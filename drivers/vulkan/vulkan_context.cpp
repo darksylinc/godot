@@ -1719,6 +1719,9 @@ Error VulkanContext::_window_create(DisplayServer::WindowID p_window_id, Display
 	window.width = p_width;
 	window.height = p_height;
 	window.vsync_mode = p_vsync_mode;
+	for (size_t i = 0u; i < FRAME_LAG; ++i) {
+		window.image_acquired_semaphores[i] = VK_NULL_HANDLE;
+	}
 	Error err = _update_swap_chain(&window);
 	ERR_FAIL_COND_V(err != OK, ERR_CANT_CREATE);
 
@@ -1789,8 +1792,14 @@ Error VulkanContext::_clean_up_swap_chain(Window *window) {
 	window->render_pass = VK_NULL_HANDLE;
 	if (window->swapchain_image_resources) {
 		for (uint32_t i = 0; i < swapchainImageCount; i++) {
-			vkDestroyImageView(device, window->swapchain_image_resources[i].view, nullptr);
-			vkDestroyFramebuffer(device, window->swapchain_image_resources[i].framebuffer, nullptr);
+			if (window->swapchain_image_resources[i].view != VK_NULL_HANDLE) {
+				vkDestroyImageView(device, window->swapchain_image_resources[i].view, nullptr);
+				window->swapchain_image_resources[i].view = VK_NULL_HANDLE;
+			}
+			if (window->swapchain_image_resources[i].framebuffer != VK_NULL_HANDLE) {
+				vkDestroyFramebuffer(device, window->swapchain_image_resources[i].framebuffer, nullptr);
+				window->swapchain_image_resources[i].framebuffer = VK_NULL_HANDLE;
+			}
 		}
 
 		free(window->swapchain_image_resources);
@@ -1798,17 +1807,22 @@ Error VulkanContext::_clean_up_swap_chain(Window *window) {
 		swapchainImageCount = 0;
 	}
 	if (separate_present_queue) {
-		vkDestroyCommandPool(device, window->present_cmd_pool, nullptr);
+		if (window->present_cmd_pool != VK_NULL_HANDLE) {
+			vkDestroyCommandPool(device, window->present_cmd_pool, nullptr);
+			window->present_cmd_pool = VK_NULL_HANDLE;
+		}
 	}
 
 	for (uint32_t i = 0; i < FRAME_LAG; i++) {
-		// Destroy the semaphores now (we'll re-create it later if we have to).
-		// We must do this because the semaphore cannot be reused if it's in a signaled state
-		// (which happens if vkAcquireNextImageKHR returned VK_ERROR_OUT_OF_DATE_KHR or VK_SUBOPTIMAL_KHR)
-		// The only way to reset it would be to present the swapchain... the one we just destroyed.
-		// And the API has no way to "unsignal" the semaphore.
-		vkDestroySemaphore(device, window->image_acquired_semaphores[i], nullptr);
-		window->image_acquired_semaphores[i] = 0;
+		if (window->image_acquired_semaphores[i] != VK_NULL_HANDLE) {
+			// Destroy the semaphores now (we'll re-create it later if we have to).
+			// We must do this because the semaphore cannot be reused if it's in a signaled state
+			// (which happens if vkAcquireNextImageKHR returned VK_ERROR_OUT_OF_DATE_KHR or
+			// VK_SUBOPTIMAL_KHR) The only way to reset it would be to present the swapchain...
+			// the one we just destroyed. And the API has no way to "unsignal" the semaphore.
+			vkDestroySemaphore(device, window->image_acquired_semaphores[i], nullptr);
+			window->image_acquired_semaphores[i] = VK_NULL_HANDLE;
+		}
 	}
 
 	return OK;
