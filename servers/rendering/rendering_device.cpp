@@ -91,7 +91,130 @@ RID RenderingDevice::shader_create_from_spirv(const Vector<ShaderStageSPIRVData>
 	return shader_create_from_bytecode(bytecode);
 }
 
-RID RenderingDevice::_texture_create(const Ref<RDTextureFormat> &p_format, const Ref<RDTextureView> &p_view, const TypedArray<PackedByteArray> &p_data) {
+#ifdef DEV_ENABLED
+void RenderingDevice::debug_check_diverging_transition(
+		RID p_texture, const ResourceLayout p_new_layout, const ResourceLayout p_last_known_layout) {
+	LocalVector<ResourceTransition>::Iterator itor = resource_transitions.begin();
+	LocalVector<ResourceTransition>::Iterator endt = resource_transitions.end();
+
+	while (itor != endt && itor->resource != p_texture)
+		++itor;
+
+	const ResourceLayout curr_layout = get_current_layout(p_texture);
+
+	const bool consistent_current_layout = is_same_layout(p_last_known_layout, curr_layout, p_texture);
+	bool consistent_old_record = false;
+
+	if (itor != endt) {
+		DEV_ASSERT(itor->newLayout == p_new_layout &&
+				"Trying to transition a texture to 2 different layouts at the same time");
+
+		if (!consistent_current_layout) {
+			// The layout the texture is currently in does not match our records.
+			// This can mean either of two things:
+			//  1. Texture was transitioned outside BarrierSolver's knowledge
+			//
+			//  2. User called resolveTransition() twice on this texture
+			//     without executing the transition yet. Thus 'lastKnownLayout'
+			//     contains the layout we will transition to. So we need
+			//     to check the current layout matches the *old* record,
+			//     not the future one.
+			//     That's what we're checking here.
+			consistent_old_record = is_same_layout(itor->oldLayout, curr_layout, p_texture);
+		}
+	}
+
+	DEV_ASSERT((consistent_current_layout || consistent_old_record) &&
+			"Layout was altered outside BarrierSolver! "
+			"Common reasons are copyTo and _autogenerateMipmaps");
+}
+#endif
+
+void RenderingDevice::resolve_transition(RID p_texture, ResourceLayout p_new_layout,
+		ResourceAccess p_access, BitField<ShaderStage> p_stage_mask) {
+	DEV_ASSERT(p_new_layout != RESOURCE_LAYOUT_UNDEFINED);
+	DEV_ASSERT(p_access != RESOURCE_ACCESS_UNDEFINED);
+
+	DEV_ASSERT(
+			(p_new_layout == RESOURCE_LAYOUT_SAMPLING || p_new_layout == RESOURCE_LAYOUT_UAV ||
+					p_new_layout == RESOURCE_LAYOUT_RENDERTARGET_READ_ONLY || p_stage_mask.is_empty()) &&
+			"stage_mask must be 0 when layouts aren't SAMPLING, UAV or RENDERTARGET_READ_ONLY");
+
+	DEV_ASSERT(((p_new_layout != RESOURCE_LAYOUT_SAMPLING && p_new_layout != RESOURCE_LAYOUT_UAV) ||
+					   !p_stage_mask.is_empty()) &&
+			"stage_mask can't be 0 when layouts are SAMPLING or UAV");
+
+	DEV_ASSERT(((p_new_layout != RESOURCE_LAYOUT_SAMPLING && //
+						p_new_layout != RESOURCE_LAYOUT_RENDERTARGET_READ_ONLY && //
+						p_new_layout != RESOURCE_LAYOUT_COPY_SRC && //
+						p_new_layout != RESOURCE_LAYOUT_COPY_DST) ||
+					   (p_new_layout == RESOURCE_LAYOUT_SAMPLING && p_access == RESOURCE_ACCESS_READ) ||
+					   (p_new_layout == RESOURCE_LAYOUT_COPY_SRC && p_access == RESOURCE_ACCESS_READ) ||
+					   (p_new_layout == RESOURCE_LAYOUT_COPY_DST && p_access == RESOURCE_ACCESS_WRITE) ||
+					   (p_new_layout == RESOURCE_LAYOUT_RENDERTARGET_READ_ONLY &&
+							   p_access == RESOURCE_ACCESS_READ)) &&
+			"Invalid Layout-access pair");
+
+	DEV_ASSERT(p_access != RESOURCE_ACCESS_UNDEFINED);
+
+	ResourceStatusMap::Iterator itor = resource_status.find(p_texture);
+
+	if (itor == resource_status.end()) {
+		ResourceStatus status = {};
+		status.layout = p_new_layout;
+		status.access = p_access;
+		status.stage_mask = uint8_t(p_stage_mask);
+		resource_status.insert(p_texture, status);
+
+		ResourceTransition resTrans;
+		resTrans.resource = p_texture;
+		if (is_discardable_content(p_texture)) {
+			resTrans.oldLayout = RESOURCE_LAYOUT_UNDEFINED;
+			if (p_access == RESOURCE_ACCESS_READ) {
+				WARN_PRINT("Transitioning texture from Undefined to a read-only layout. Perhaps you "
+						   "didn't want to set DiscardableContent?");
+			}
+		} else {
+			resTrans.oldLayout = get_current_layout(p_texture);
+		}
+		resTrans.old_access = RESOURCE_ACCESS_UNDEFINED;
+		resTrans.newLayout = p_new_layout;
+		resTrans.new_access = p_access;
+		resTrans.old_stage_mask = 0;
+		resTrans.new_stage_mask = uint8_t(p_stage_mask);
+		resource_transitions.push_back(resTrans);
+	} else {
+#ifdef DEV_ENABLED
+		debug_check_diverging_transition(p_texture, p_new_layout, itor->value.layout);
+#endif
+
+		if (!is_same_layout(itor->value.layout, p_new_layout, p_texture) || //
+				(p_new_layout == RESOURCE_LAYOUT_UAV && //
+						(p_access != RESOURCE_ACCESS_READ || //
+								itor->value.access != RESOURCE_ACCESS_READ))) {
+			ResourceTransition resTrans;
+			resTrans.resource = p_texture;
+			resTrans.oldLayout = itor->value.layout;
+			resTrans.newLayout = p_new_layout;
+			resTrans.old_access = itor->value.access;
+			resTrans.new_access = p_access;
+			resTrans.old_stage_mask = itor->value.stage_mask;
+			resTrans.new_stage_mask = uint8_t(p_stage_mask);
+
+			resource_transitions.push_back(resTrans);
+
+			// After a barrier, the stage_mask should be reset
+			itor->value.stage_mask = 0u;
+		}
+
+		itor->value.layout = p_new_layout;
+		itor->value.access = p_access;
+		itor->value.stage_mask |= p_stage_mask;
+	}
+}
+
+RID RenderingDevice::_texture_create(const Ref<RDTextureFormat> &p_format,
+		const Ref<RDTextureView> &p_view, const TypedArray<PackedByteArray> &p_data) {
 	ERR_FAIL_COND_V(p_format.is_null(), RID());
 	ERR_FAIL_COND_V(p_view.is_null(), RID());
 	Vector<Vector<uint8_t>> data;

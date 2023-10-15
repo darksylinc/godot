@@ -9754,6 +9754,74 @@ bool RenderingDeviceVulkan::has_feature(const Features p_feature) const {
 	}
 }
 
+RenderingDevice::ResourceLayout RenderingDeviceVulkan::get_current_layout(RID p_texture) {
+	const Texture *tex = texture_owner.get_or_null(p_texture);
+
+	switch (tex->layout) {
+		case VK_IMAGE_LAYOUT_UNDEFINED:
+			return RESOURCE_LAYOUT_UNDEFINED;
+		case VK_IMAGE_LAYOUT_GENERAL:
+			return RESOURCE_LAYOUT_UAV;
+		case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+		case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+			return RESOURCE_LAYOUT_RENDERTARGET;
+		case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
+			return RESOURCE_LAYOUT_RENDERTARGET_READ_ONLY;
+		case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+			return RESOURCE_LAYOUT_SAMPLING;
+		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+			return RESOURCE_LAYOUT_COPY_SRC;
+		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+			return RESOURCE_LAYOUT_COPY_DST;
+		case VK_IMAGE_LAYOUT_PREINITIALIZED:
+			return RESOURCE_LAYOUT_SAMPLING;
+		case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+			return RESOURCE_LAYOUT_PRESENT_READY;
+		default:
+			break;
+	}
+
+	DEV_ASSERT(false && "We should never reach this path");
+
+	return RESOURCE_LAYOUT_UNDEFINED;
+}
+
+bool RenderingDeviceVulkan::is_discardable_content(RID p_texture)
+{
+	// TODO: Not implemented yet
+	return false;
+}
+
+VkImageLayout RenderingDeviceVulkan::get(ResourceLayout layout, const Texture *tex) const {
+	switch (layout) {
+		case RESOURCE_LAYOUT_UNDEFINED:
+			return VK_IMAGE_LAYOUT_UNDEFINED;
+		case RESOURCE_LAYOUT_SAMPLING:
+			return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		case RESOURCE_LAYOUT_RENDERTARGET:
+			return tex->barrier_aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT
+					? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+					: VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		case RESOURCE_LAYOUT_RENDERTARGET_READ_ONLY:
+			return tex->barrier_aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT
+					? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+					: VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+		case RESOURCE_LAYOUT_UAV:
+			return VK_IMAGE_LAYOUT_GENERAL;
+		case RESOURCE_LAYOUT_COPY_SRC:
+			return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		case RESOURCE_LAYOUT_COPY_DST:
+			return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		case RESOURCE_LAYOUT_PRESENT_READY:
+			return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	}
+}
+
+bool RenderingDeviceVulkan::is_same_layout(ResourceLayout p_a, ResourceLayout p_b, RID p_texture) {
+	const Texture *tex = texture_owner.get_or_null(p_texture);
+	return get(p_a, tex) == get(p_b, tex);
+}
+
 RenderingDeviceVulkan::RenderingDeviceVulkan() {
 	device_capabilities.device_family = DEVICE_VULKAN;
 }

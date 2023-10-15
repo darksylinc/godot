@@ -1279,6 +1279,16 @@ public:
 
 	virtual bool has_feature(const Features p_feature) const;
 
+	virtual ResourceLayout get_current_layout(RID p_texture);
+
+	virtual bool is_discardable_content(RID p_texture);
+
+	virtual bool is_same_layout(ResourceLayout p_a, ResourceLayout p_b, RID p_texture);
+
+protected:
+	VkImageLayout get(ResourceLayout layout, const Texture *tex) const;
+
+public:
 	RenderingDeviceVulkan();
 	~RenderingDeviceVulkan();
 };

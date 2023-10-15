@@ -408,6 +408,24 @@ public:
 		BARRIER_MASK_NO_BARRIER = 0x8000,
 	};
 
+	enum ResourceLayout {
+		RESOURCE_LAYOUT_UNDEFINED,
+		RESOURCE_LAYOUT_SAMPLING,
+		RESOURCE_LAYOUT_RENDERTARGET,
+		RESOURCE_LAYOUT_RENDERTARGET_READ_ONLY,
+		RESOURCE_LAYOUT_UAV,
+		RESOURCE_LAYOUT_COPY_SRC,
+		RESOURCE_LAYOUT_COPY_DST,
+		RESOURCE_LAYOUT_PRESENT_READY
+	};
+
+	enum ResourceAccess {
+		RESOURCE_ACCESS_UNDEFINED = 0x00,
+		RESOURCE_ACCESS_READ = 0x01,
+		RESOURCE_ACCESS_WRITE = 0x02,
+		RESOURCE_ACCESS_READ_WRITE = RESOURCE_ACCESS_READ | RESOURCE_ACCESS_WRITE
+	};
+
 	/*****************/
 	/**** TEXTURE ****/
 	/*****************/
@@ -1208,6 +1226,7 @@ public:
 	virtual void compute_list_end(BitField<BarrierMask> p_post_barrier = BARRIER_MASK_ALL_BARRIERS) = 0;
 
 	virtual void barrier(BitField<BarrierMask> p_from = BARRIER_MASK_ALL_BARRIERS, BitField<BarrierMask> p_to = BARRIER_MASK_ALL_BARRIERS) = 0;
+	virtual void prepareMsaaForCompute(LocalVector<RID> p_textures) = 0;
 	virtual void full_barrier() = 0;
 
 	/***************/
@@ -1287,6 +1306,9 @@ public:
 
 	virtual void submit() = 0;
 	virtual void sync() = 0;
+
+	void resolve_transition(RID p_texture, ResourceLayout p_new_layout, ResourceAccess p_access,
+			BitField<ShaderStage> p_stage_mask);
 
 	enum MemoryType {
 		MEMORY_TEXTURES,
@@ -1383,6 +1405,48 @@ protected:
 	};
 
 	Error _reflect_spirv(const Vector<ShaderStageSPIRVData> &p_spirv, SpirvReflectionData &r_reflection_data);
+
+	struct ResourceTransition {
+		RID resource;
+
+		ResourceLayout oldLayout;
+		ResourceLayout newLayout;
+
+		// If old_access == Undefined, it means there are no previous stage dependencies
+		// AND there is no guarantee previous contents will be preserved.
+		ResourceAccess old_access;
+		// new_access == Undefined is invalid
+		ResourceAccess new_access;
+
+		// If old_stage_mask == Undefined, it means there are no previous
+		// stage dependencies (e.g. beginning of the frame)
+		uint8_t old_stage_mask;
+		// If new_stage_mask == Undefined is invalid
+		uint8_t new_stage_mask;
+	};
+
+	struct ResourceStatus
+	{
+		ResourceLayout layout;
+		ResourceAccess access;
+		// Accumulates a bitmaks of shader stages currently using this resource
+		uint8_t stage_mask;
+	};
+
+	typedef HashMap<RID, ResourceStatus> ResourceStatusMap;
+	ResourceStatusMap resource_status;
+	LocalVector<ResourceTransition> resource_transitions;
+
+	virtual ResourceLayout get_current_layout(RID p_texture) = 0;
+
+	virtual bool is_discardable_content(RID p_texture) = 0;
+
+#ifdef DEV_ENABLED
+	void debug_check_diverging_transition(
+			RID p_texture, const ResourceLayout p_new_layout, const ResourceLayout p_last_known_layout);
+#endif
+
+	virtual bool is_same_layout(ResourceLayout p_a, ResourceLayout p_b, RID p_texture) = 0;
 };
 
 VARIANT_ENUM_CAST(RenderingDevice::DeviceType)
