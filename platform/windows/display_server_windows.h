@@ -52,10 +52,12 @@
 #include "drivers/xaudio2/audio_driver_xaudio2.h"
 #endif
 
+#if defined(RD_ENABLED)
+#include "servers/rendering/rendering_device.h"
+
 #if defined(VULKAN_ENABLED)
 #include "vulkan_context_win.h"
-
-#include "drivers/vulkan/rendering_device_vulkan.h"
+#endif
 #endif
 
 #if defined(GLES3_ENABLED)
@@ -342,9 +344,9 @@ class DisplayServerWindows : public DisplayServer {
 	GLManagerNative_Windows *gl_manager_native = nullptr;
 #endif
 
-#if defined(VULKAN_ENABLED)
-	VulkanContextWindows *context_vulkan = nullptr;
-	RenderingDeviceVulkan *rendering_device_vulkan = nullptr;
+#if defined(RD_ENABLED)
+	ApiContextRD *context_rd = nullptr;
+	RenderingDevice *rendering_device = nullptr;
 #endif
 
 	RBMap<int, Vector2> touch_state;

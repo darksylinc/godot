@@ -1102,9 +1102,9 @@ void DisplayServerWindows::delete_sub_window(WindowID p_window) {
 		window_set_transient(p_window, INVALID_WINDOW_ID);
 	}
 
-#ifdef VULKAN_ENABLED
-	if (context_vulkan) {
-		context_vulkan->window_destroy(p_window);
+#ifdef RD_ENABLED
+	if (context_rd) {
+		context_rd->window_destroy(p_window);
 	}
 #endif
 #ifdef GLES3_ENABLED
@@ -1534,9 +1534,9 @@ void DisplayServerWindows::window_set_size(const Size2i p_size, WindowID p_windo
 	wd.width = w;
 	wd.height = h;
 
-#if defined(VULKAN_ENABLED)
-	if (context_vulkan) {
-		context_vulkan->window_resize(p_window, w, h);
+#if defined(RD_ENABLED)
+	if (context_rd) {
+		context_rd->window_resize(p_window, w, h);
 	}
 #endif
 #if defined(GLES3_ENABLED)
@@ -2582,9 +2582,9 @@ void DisplayServerWindows::set_icon(const Ref<Image> &p_icon) {
 
 void DisplayServerWindows::window_set_vsync_mode(DisplayServer::VSyncMode p_vsync_mode, WindowID p_window) {
 	_THREAD_SAFE_METHOD_
-#if defined(VULKAN_ENABLED)
-	if (context_vulkan) {
-		context_vulkan->set_vsync_mode(p_window, p_vsync_mode);
+#if defined(RD_ENABLED)
+	if (context_rd) {
+		context_rd->set_vsync_mode(p_window, p_vsync_mode);
 	}
 #endif
 
@@ -2600,9 +2600,9 @@ void DisplayServerWindows::window_set_vsync_mode(DisplayServer::VSyncMode p_vsyn
 
 DisplayServer::VSyncMode DisplayServerWindows::window_get_vsync_mode(WindowID p_window) const {
 	_THREAD_SAFE_METHOD_
-#if defined(VULKAN_ENABLED)
-	if (context_vulkan) {
-		return context_vulkan->get_vsync_mode(p_window);
+#if defined(RD_ENABLED)
+	if (context_rd) {
+		return context_rd->get_vsync_mode(p_window);
 	}
 #endif
 
@@ -3767,10 +3767,10 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 
 					rect_changed = true;
 				}
-#if defined(VULKAN_ENABLED)
-				if (context_vulkan && window.context_created) {
+#if defined(RD_ENABLED)
+				if (context_rd && window.context_created) {
 					// Note: Trigger resize event to update swapchains when window is minimized/restored, even if size is not changed.
-					context_vulkan->window_resize(window_id, window.width, window.height);
+					context_rd->window_resize(window_id, window.width, window.height);
 				}
 #endif
 			}
@@ -4324,13 +4324,24 @@ DisplayServer::WindowID DisplayServerWindows::_create_window(WindowMode p_mode, 
 			::DwmSetWindowAttribute(wd.hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &value, sizeof(value));
 		}
 
+#ifdef RD_ENABLED
+		if (context_rd) {
+			union {
 #ifdef VULKAN_ENABLED
-		if (context_vulkan) {
-			if (context_vulkan->window_create(id, p_vsync_mode, wd.hWnd, hInstance, WindowRect.right - WindowRect.left, WindowRect.bottom - WindowRect.top) != OK) {
-				memdelete(context_vulkan);
-				context_vulkan = nullptr;
+				VulkanContextWindows::WindowPlatformData vulkan;
+#endif
+			} wpd;
+#ifdef VULKAN_ENABLED
+			if (rendering_driver == "vulkan") {
+				wpd.vulkan.window = wd.hWnd,
+				wpd.vulkan.instance = hInstance;
+			}
+#endif
+			if (context_rd->window_create(id, p_vsync_mode, WindowRect.right - WindowRect.left, WindowRect.bottom - WindowRect.top, &wpd) != OK) {
+				memdelete(context_rd);
+				context_rd = nullptr;
 				windows.erase(id);
-				ERR_FAIL_V_MSG(INVALID_WINDOW_ID, "Failed to create Vulkan Window.");
+				ERR_FAIL_V_MSG(INVALID_WINDOW_ID, vformat("Failed to create %s Window.", context_rd->get_api_name()));
 			}
 			wd.context_created = true;
 		}
@@ -4633,18 +4644,23 @@ DisplayServerWindows::DisplayServerWindows(const String &p_rendering_driver, Win
 
 	_register_raw_input_devices(INVALID_WINDOW_ID);
 
+#if defined(RD_ENABLED)
 #if defined(VULKAN_ENABLED)
 	if (rendering_driver == "vulkan") {
-		context_vulkan = memnew(VulkanContextWindows);
-		if (context_vulkan->initialize() != OK) {
-			memdelete(context_vulkan);
-			context_vulkan = nullptr;
+		context_rd = memnew(VulkanContextWindows);
+	}
+#endif
+
+	if (context_rd) {
+		if (context_rd->initialize() != OK) {
+			memdelete(context_rd);
+			context_rd = nullptr;
 			r_error = ERR_UNAVAILABLE;
 			return;
 		}
 	}
 #endif
-	// Init context and rendering device
+// Init context and rendering device
 #if defined(GLES3_ENABLED)
 
 	bool fallback = GLOBAL_GET("rendering/gl_compatibility/fallback_to_angle");
@@ -4719,11 +4735,10 @@ DisplayServerWindows::DisplayServerWindows(const String &p_rendering_driver, Win
 
 	show_window(MAIN_WINDOW_ID);
 
-#if defined(VULKAN_ENABLED)
-
-	if (rendering_driver == "vulkan") {
-		rendering_device_vulkan = memnew(RenderingDeviceVulkan);
-		rendering_device_vulkan->initialize(context_vulkan);
+#if defined(RD_ENABLED)
+	if (context_rd) {
+		rendering_device = memnew(RenderingDevice);
+		rendering_device->initialize(context_rd);
 
 		RendererCompositorRD::make_current();
 	}
@@ -4821,9 +4836,9 @@ DisplayServerWindows::~DisplayServerWindows() {
 #endif
 
 	if (windows.has(MAIN_WINDOW_ID)) {
-#ifdef VULKAN_ENABLED
-		if (context_vulkan) {
-			context_vulkan->window_destroy(MAIN_WINDOW_ID);
+#ifdef RD_ENABLED
+		if (context_rd) {
+			context_rd->window_destroy(MAIN_WINDOW_ID);
 		}
 #endif
 		if (wintab_available && windows[MAIN_WINDOW_ID].wtctx) {
@@ -4833,16 +4848,16 @@ DisplayServerWindows::~DisplayServerWindows() {
 		DestroyWindow(windows[MAIN_WINDOW_ID].hWnd);
 	}
 
-#if defined(VULKAN_ENABLED)
-	if (rendering_device_vulkan) {
-		rendering_device_vulkan->finalize();
-		memdelete(rendering_device_vulkan);
-		rendering_device_vulkan = nullptr;
+#if defined(RD_ENABLED)
+	if (rendering_device) {
+		rendering_device->finalize();
+		memdelete(rendering_device);
+		rendering_device = nullptr;
 	}
 
-	if (context_vulkan) {
-		memdelete(context_vulkan);
-		context_vulkan = nullptr;
+	if (context_rd) {
+		memdelete(context_rd);
+		context_rd = nullptr;
 	}
 #endif
 
