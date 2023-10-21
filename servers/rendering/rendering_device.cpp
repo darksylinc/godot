@@ -106,7 +106,7 @@ void RenderingDevice::debug_check_diverging_transition(
 	bool consistent_old_record = false;
 
 	if (itor != endt) {
-		DEV_ASSERT(itor->newLayout == p_new_layout &&
+		DEV_ASSERT(itor->new_layout == p_new_layout &&
 				"Trying to transition a texture to 2 different layouts at the same time");
 
 		if (!consistent_current_layout) {
@@ -120,7 +120,7 @@ void RenderingDevice::debug_check_diverging_transition(
 			//     to check the current layout matches the *old* record,
 			//     not the future one.
 			//     That's what we're checking here.
-			consistent_old_record = is_same_layout(itor->oldLayout, curr_layout, p_texture);
+			consistent_old_record = is_same_layout(itor->old_layout, curr_layout, p_texture);
 		}
 	}
 
@@ -169,16 +169,16 @@ void RenderingDevice::resolve_transition(RID p_texture, ResourceLayout p_new_lay
 		ResourceTransition resTrans;
 		resTrans.resource = p_texture;
 		if (is_discardable_content(p_texture)) {
-			resTrans.oldLayout = RESOURCE_LAYOUT_UNDEFINED;
+			resTrans.old_layout = RESOURCE_LAYOUT_UNDEFINED;
 			if (p_access == RESOURCE_ACCESS_READ) {
 				WARN_PRINT("Transitioning texture from Undefined to a read-only layout. Perhaps you "
 						   "didn't want to set DiscardableContent?");
 			}
 		} else {
-			resTrans.oldLayout = get_current_layout(p_texture);
+			resTrans.old_layout = get_current_layout(p_texture);
 		}
 		resTrans.old_access = RESOURCE_ACCESS_UNDEFINED;
-		resTrans.newLayout = p_new_layout;
+		resTrans.new_layout = p_new_layout;
 		resTrans.new_access = p_access;
 		resTrans.old_stage_mask = 0;
 		resTrans.new_stage_mask = uint8_t(p_stage_mask);
@@ -194,8 +194,8 @@ void RenderingDevice::resolve_transition(RID p_texture, ResourceLayout p_new_lay
 								itor->value.access != RESOURCE_ACCESS_READ))) {
 			ResourceTransition resTrans;
 			resTrans.resource = p_texture;
-			resTrans.oldLayout = itor->value.layout;
-			resTrans.newLayout = p_new_layout;
+			resTrans.old_layout = itor->value.layout;
+			resTrans.new_layout = p_new_layout;
 			resTrans.old_access = itor->value.access;
 			resTrans.new_access = p_access;
 			resTrans.old_stage_mask = itor->value.stage_mask;

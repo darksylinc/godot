@@ -182,6 +182,8 @@ private:
 
 	// Commands.
 
+	uint32_t supported_stages = 0u;
+
 	bool prepared = false;
 
 	Vector<VkCommandBuffer> command_buffer_queue;
@@ -298,6 +300,8 @@ public:
 
 	uint32_t get_frame_index() const { return frame_index; }
 	uint32_t get_frame_count() const { return frame_count; }
+
+	uint32_t get_supported_stages() const { return supported_stages; }
 
 	static void set_vulkan_hooks(VulkanHooks *p_vulkan_hooks) { vulkan_hooks = p_vulkan_hooks; };
 

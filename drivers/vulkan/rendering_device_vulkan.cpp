@@ -3572,11 +3572,11 @@ VkRenderPass RenderingDeviceVulkan::_render_pass_create(const Vector<AttachmentF
 				case INITIAL_ACTION_CLEAR: {
 					if (p_attachments[i].usage_flags & TEXTURE_USAGE_COLOR_ATTACHMENT_BIT) {
 						description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-						description.initialLayout = is_sampled ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : (is_storage ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+						description.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 						description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 					} else if (p_attachments[i].usage_flags & TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
 						description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-						description.initialLayout = is_sampled ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : (is_storage ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+						description.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 						description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 						dependency_from_external.srcStageMask |= reading_stages;
 					} else {
@@ -3589,11 +3589,11 @@ VkRenderPass RenderingDeviceVulkan::_render_pass_create(const Vector<AttachmentF
 				case INITIAL_ACTION_KEEP: {
 					if (p_attachments[i].usage_flags & TEXTURE_USAGE_COLOR_ATTACHMENT_BIT) {
 						description.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-						description.initialLayout = is_sampled ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : (is_storage ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+						description.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 						description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 					} else if (p_attachments[i].usage_flags & TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
 						description.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-						description.initialLayout = is_sampled ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : (is_storage ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+						description.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 						description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 						dependency_from_external.srcStageMask |= reading_stages;
 					} else {
@@ -3606,7 +3606,7 @@ VkRenderPass RenderingDeviceVulkan::_render_pass_create(const Vector<AttachmentF
 				case INITIAL_ACTION_DROP: {
 					if (p_attachments[i].usage_flags & TEXTURE_USAGE_COLOR_ATTACHMENT_BIT) {
 						description.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-						description.initialLayout = is_sampled ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : (is_storage ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+						description.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 						description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 					} else if (p_attachments[i].usage_flags & TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
 						description.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -3714,12 +3714,12 @@ VkRenderPass RenderingDeviceVulkan::_render_pass_create(const Vector<AttachmentF
 					if (p_attachments[i].usage_flags & TEXTURE_USAGE_COLOR_ATTACHMENT_BIT) {
 						description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 						description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-						description.finalLayout = is_sampled ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : (is_storage ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+						description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 						update_external_dependency_for_store(dependency_to_external, is_sampled, is_storage, false);
 					} else if (p_attachments[i].usage_flags & TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
 						description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 						description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
-						description.finalLayout = is_sampled ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : (is_storage ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+						description.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 						update_external_dependency_for_store(dependency_to_external, is_sampled, is_storage, true);
 					} else {
 						description.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -3732,11 +3732,11 @@ VkRenderPass RenderingDeviceVulkan::_render_pass_create(const Vector<AttachmentF
 					if (p_attachments[i].usage_flags & TEXTURE_USAGE_COLOR_ATTACHMENT_BIT) {
 						description.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 						description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-						description.finalLayout = is_sampled ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : (is_storage ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+						description.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 					} else if (p_attachments[i].usage_flags & TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
 						description.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 						description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-						description.finalLayout = is_sampled ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : (is_storage ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+						description.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 					} else {
 						description.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 						description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -9820,6 +9820,241 @@ VkImageLayout RenderingDeviceVulkan::get(ResourceLayout layout, const Texture *t
 bool RenderingDeviceVulkan::is_same_layout(ResourceLayout p_a, ResourceLayout p_b, RID p_texture) {
 	const Texture *tex = texture_owner.get_or_null(p_texture);
 	return get(p_a, tex) == get(p_b, tex);
+}
+
+VkAccessFlags RenderingDeviceVulkan::get_access_flags(
+		ResourceLayout p_layout, ResourceAccess p_access, const Texture *p_texture) {
+	VkAccessFlags tex_access_flags = 0;
+
+	switch (p_layout) {
+		case RESOURCE_LAYOUT_SAMPLING:
+			tex_access_flags |= VK_ACCESS_SHADER_READ_BIT;
+			break;
+		case RESOURCE_LAYOUT_RENDERTARGET:
+			if (p_texture->barrier_aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT) {
+				tex_access_flags |=
+						VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			} else {
+				tex_access_flags |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+						VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+			}
+			break;
+		case RESOURCE_LAYOUT_RENDERTARGET_READ_ONLY:
+			if (p_texture->barrier_aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT) {
+				tex_access_flags |= VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+			} else {
+				tex_access_flags |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+			}
+			break;
+		case RESOURCE_LAYOUT_UAV:
+			if (p_access & RESOURCE_ACCESS_READ) {
+				tex_access_flags |= VK_ACCESS_SHADER_READ_BIT;
+			}
+			if (p_access & RESOURCE_ACCESS_WRITE) {
+				tex_access_flags |= VK_ACCESS_SHADER_WRITE_BIT;
+			}
+			break;
+		case RESOURCE_LAYOUT_COPY_SRC:
+			tex_access_flags |= VK_ACCESS_TRANSFER_READ_BIT;
+			break;
+		case RESOURCE_LAYOUT_COPY_DST:
+			tex_access_flags |= VK_ACCESS_TRANSFER_WRITE_BIT;
+			break;
+		case RESOURCE_LAYOUT_PRESENT_READY:
+			tex_access_flags = 0u;
+			break;
+		case RESOURCE_LAYOUT_UNDEFINED:
+			break;
+	}
+
+	return tex_access_flags;
+}
+
+// Mask away read flags from srcAccessMask
+static constexpr uint32_t src_valid_access_flags = 0xFFFFFFFF ^
+		(VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_INDEX_READ_BIT |
+				VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT |
+				VK_ACCESS_INPUT_ATTACHMENT_READ_BIT | VK_ACCESS_SHADER_READ_BIT |
+				VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+				VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_HOST_READ_BIT | VK_ACCESS_MEMORY_READ_BIT |
+				VK_ACCESS_TRANSFORM_FEEDBACK_COUNTER_READ_BIT_EXT |
+				VK_ACCESS_CONDITIONAL_RENDERING_READ_BIT_EXT |
+				VK_ACCESS_COLOR_ATTACHMENT_READ_NONCOHERENT_BIT_EXT |
+				VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_SHADING_RATE_IMAGE_READ_BIT_NV |
+				VK_ACCESS_FRAGMENT_DENSITY_MAP_READ_BIT_EXT | VK_ACCESS_COMMAND_PREPROCESS_READ_BIT_NV);
+
+static VkPipelineStageFlags to_vk_pipeline_stage_flags(
+		RenderingDevice::ResourceLayout p_layout, const bool p_is_depth) {
+	switch (p_layout) {
+		case RenderingDevice::RESOURCE_LAYOUT_PRESENT_READY:
+			return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+		case RenderingDevice::RESOURCE_LAYOUT_RENDERTARGET:
+		case RenderingDevice::RESOURCE_LAYOUT_RENDERTARGET_READ_ONLY:
+			if (p_is_depth) {
+				return VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+						VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+			} else {
+				return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			}
+
+		case RenderingDevice::RESOURCE_LAYOUT_SAMPLING:
+		case RenderingDevice::RESOURCE_LAYOUT_UAV:
+			return VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+					VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT |
+					VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT |
+					VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+					VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+
+		case RenderingDevice::RESOURCE_LAYOUT_COPY_SRC:
+		case RenderingDevice::RESOURCE_LAYOUT_COPY_DST:
+			return VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+		case RenderingDevice::RESOURCE_LAYOUT_UNDEFINED:
+			return 0;
+	}
+
+	return 0;
+}
+
+static VkPipelineStageFlags godot_to_vk_stage_flags(
+		BitField<RenderingDevice::ShaderStage> p_godot_stage_mask) {
+	VkPipelineStageFlags retVal = 0u;
+	if (p_godot_stage_mask.has_flag(RenderingDevice::SHADER_STAGE_VERTEX_BIT)) {
+		retVal |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+	}
+	if (p_godot_stage_mask.has_flag(RenderingDevice::SHADER_STAGE_FRAGMENT_BIT)) {
+		retVal |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	}
+	if (p_godot_stage_mask.has_flag(RenderingDevice::SHADER_STAGE_TESSELATION_CONTROL_BIT)) {
+		retVal |= VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT;
+	}
+	if (p_godot_stage_mask.has_flag(RenderingDevice::SHADER_STAGE_TESSELATION_EVALUATION_BIT)) {
+		retVal |= VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT;
+	}
+	if (p_godot_stage_mask.has_flag(RenderingDevice::SHADER_STAGE_COMPUTE_BIT)) {
+		retVal |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+	}
+
+	return retVal;
+}
+
+void RenderingDeviceVulkan::execute_transitions() {
+	image_memory_barriers.reserve(resource_transitions.size());
+
+	VkPipelineStageFlags src_stage = 0u;
+	VkPipelineStageFlags dst_stage = 0u;
+
+	uint32_t buffer_src_barrier_bits = 0u;
+	uint32_t buffer_dst_barrier_bits = 0u;
+
+	for (const ResourceTransition &res_transition : resource_transitions) {
+		if (!res_transition.resource.is_null()) {
+			Texture *texture = texture_owner.get_or_null(res_transition.resource);
+
+			VkImageMemoryBarrier image_barrier = {};
+			image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			if (texture->barrier_aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT) {
+				image_barrier.srcAccessMask =
+						VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			} else {
+				image_barrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+						VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+			}
+			if (texture->usage_flags & (TEXTURE_USAGE_STORAGE_BIT | TEXTURE_USAGE_STORAGE_ATOMIC_BIT)) {
+				image_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+			} else {
+				image_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			}
+
+			image_barrier.oldLayout = get(res_transition.old_layout, texture);
+			image_barrier.newLayout = get(res_transition.new_layout, texture);
+			DEV_ASSERT(texture->layout == image_barrier.oldLayout);
+			image_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_barrier.image = texture->image;
+			image_barrier.subresourceRange.aspectMask = texture->barrier_aspect_mask;
+			image_barrier.subresourceRange.levelCount = texture->mipmaps;
+			image_barrier.subresourceRange.layerCount = texture->layers;
+
+			const bool is_depth = texture->barrier_aspect_mask != VK_IMAGE_ASPECT_COLOR_BIT;
+
+			// If old_access == RESOURCE_ACCESS_UNDEFINED then this texture is used for
+			// the first time on a new frame (but not necessarily the first time ever)
+			// thus there are no caches needed to flush.
+			//
+			// dst_stage only needs to wait for the transition to happen though.
+			if (res_transition.old_access != RESOURCE_ACCESS_UNDEFINED) {
+				if (res_transition.old_access & RESOURCE_ACCESS_WRITE) {
+					image_barrier.srcAccessMask = get_access_flags(res_transition.old_layout,
+														  res_transition.old_access, texture) &
+							src_valid_access_flags;
+				}
+
+				if (res_transition.old_layout != RESOURCE_LAYOUT_SAMPLING &&
+						res_transition.old_layout != RESOURCE_LAYOUT_UAV) {
+					src_stage |= to_vk_pipeline_stage_flags(res_transition.old_layout, is_depth);
+				}
+
+				if (res_transition.old_stage_mask != 0u)
+					src_stage |= godot_to_vk_stage_flags(res_transition.old_stage_mask);
+			}
+
+			image_barrier.dstAccessMask =
+					get_access_flags(res_transition.new_layout, res_transition.new_access, texture);
+
+			if (res_transition.new_layout != RESOURCE_LAYOUT_SAMPLING &&
+					res_transition.new_layout != RESOURCE_LAYOUT_UAV) {
+				dst_stage |= to_vk_pipeline_stage_flags(res_transition.new_layout, is_depth);
+			}
+
+			if (res_transition.new_stage_mask != 0u) {
+				dst_stage |= godot_to_vk_stage_flags(res_transition.new_stage_mask);
+			}
+
+			texture->layout = image_barrier.newLayout;
+
+			image_memory_barriers.push_back(image_barrier);
+		} else {
+			src_stage |= godot_to_vk_stage_flags(res_transition.old_stage_mask);
+			dst_stage |= godot_to_vk_stage_flags(res_transition.new_stage_mask);
+
+			if (res_transition.old_access & RESOURCE_ACCESS_WRITE) {
+				buffer_src_barrier_bits |= VK_ACCESS_SHADER_WRITE_BIT;
+			}
+
+			if (res_transition.new_access & RESOURCE_ACCESS_READ) {
+				buffer_dst_barrier_bits |= VK_ACCESS_SHADER_READ_BIT;
+			}
+			if (res_transition.new_access & RESOURCE_ACCESS_WRITE) {
+				buffer_dst_barrier_bits |= VK_ACCESS_SHADER_WRITE_BIT;
+			}
+		}
+	}
+
+	VkMemoryBarrier mem_barrier = {};
+	uint32_t num_mem_barriers = 0u;
+	if (buffer_src_barrier_bits || buffer_dst_barrier_bits) {
+		mem_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		mem_barrier.srcAccessMask = buffer_src_barrier_bits & src_valid_access_flags;
+		mem_barrier.dstAccessMask = buffer_dst_barrier_bits;
+		num_mem_barriers = 1u;
+	}
+
+	if (src_stage == 0) {
+		src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+	}
+	if (dst_stage == 0) {
+		dst_stage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+	}
+
+	const uint32_t frame = context->get_frame_index();
+	vkCmdPipelineBarrier(frames[frame].draw_command_buffer, src_stage & context->get_supported_stages(),
+			dst_stage & context->get_supported_stages(), 0, num_mem_barriers, &mem_barrier, 0u, 0,
+			static_cast<uint32_t>(image_memory_barriers.size()), image_memory_barriers.ptr());
+
+	image_memory_barriers.clear();
+	resource_transitions.clear();
 }
 
 RenderingDeviceVulkan::RenderingDeviceVulkan() {

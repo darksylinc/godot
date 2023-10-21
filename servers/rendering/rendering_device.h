@@ -1409,8 +1409,8 @@ protected:
 	struct ResourceTransition {
 		RID resource;
 
-		ResourceLayout oldLayout;
-		ResourceLayout newLayout;
+		ResourceLayout old_layout;
+		ResourceLayout new_layout;
 
 		// If old_access == Undefined, it means there are no previous stage dependencies
 		// AND there is no guarantee previous contents will be preserved.

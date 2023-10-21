@@ -1048,6 +1048,8 @@ class RenderingDeviceVulkan : public RenderingDevice {
 	HashMap<uint32_t, VmaPool> small_allocs_pools;
 	VmaPool _find_or_create_small_allocs_pool(uint32_t p_mem_type_index);
 
+	LocalVector<VkImageMemoryBarrier> image_memory_barriers;
+
 	VulkanContext *context = nullptr;
 
 	uint64_t image_memory = 0;
@@ -1284,6 +1286,11 @@ public:
 	virtual bool is_discardable_content(RID p_texture);
 
 	virtual bool is_same_layout(ResourceLayout p_a, ResourceLayout p_b, RID p_texture);
+
+	static VkAccessFlags get_access_flags(
+			ResourceLayout p_layout, ResourceAccess p_access, const Texture *p_texture);
+
+	void execute_transitions();
 
 protected:
 	VkImageLayout get(ResourceLayout layout, const Texture *tex) const;

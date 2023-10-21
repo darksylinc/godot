@@ -1354,6 +1354,15 @@ Error VulkanContext::_create_physical_device(VkSurfaceKHR p_surface) {
 	//  features based on this query
 	vkGetPhysicalDeviceFeatures(gpu, &physical_device_features);
 
+	supported_stages = 0xFFFFFFFF;
+	if (!physical_device_features.geometryShader) {
+		supported_stages ^= VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT;
+	}
+	if (!physical_device_features.tessellationShader) {
+		supported_stages ^= VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT |
+				VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT;
+	}
+
 	// Check required features and abort if any of them is missing.
 	if (!physical_device_features.imageCubeArray || !physical_device_features.independentBlend) {
 		String error_string = vformat("Your GPU (%s) does not support the following features which are required to use Vulkan-based renderers in Godot:\n\n", device_name);
