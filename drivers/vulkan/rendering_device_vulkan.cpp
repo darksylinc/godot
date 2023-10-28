@@ -8442,6 +8442,59 @@ void RenderingDeviceVulkan::barrier(BitField<BarrierMask> p_from, BitField<Barri
 	_memory_barrier(src_barrier_flags, dst_barrier_flags, src_access_flags, dst_access_flags, true);
 }
 
+void RenderingDeviceVulkan::prepareMsaaForCompute(LocalVector<RID> p_textures) {
+	const VkPipelineStageFlags src_stage_mask = /*VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+			VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT*/
+			VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
+	const VkPipelineStageFlags dst_stage_mask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+
+	LocalVector<VkImageMemoryBarrier> imageBarriers;
+	imageBarriers.reserve(p_textures.size());
+
+	VkMemoryBarrier memBarrier = {};
+	memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+
+	for( const RID rid : p_textures )
+	{
+		Texture *texture = texture_owner.get_or_null(rid);
+
+		VkImageMemoryBarrier imageBarrier = {};
+		imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		if (texture->barrier_aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT) {
+			imageBarrier.srcAccessMask =
+					VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		} else {
+			imageBarrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+					VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		}
+		if (texture->usage_flags & (TEXTURE_USAGE_STORAGE_BIT | TEXTURE_USAGE_STORAGE_ATOMIC_BIT)) {
+			imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		} else {
+			imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		}
+		imageBarrier.oldLayout = texture->layout;
+		imageBarrier.newLayout = texture->layout;
+		imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		imageBarrier.image = texture->image;
+		imageBarrier.subresourceRange.aspectMask = texture->barrier_aspect_mask;
+		imageBarrier.subresourceRange.levelCount = texture->mipmaps;
+		imageBarrier.subresourceRange.layerCount = texture->layers;
+
+		memBarrier.srcAccessMask |= imageBarrier.srcAccessMask;
+		memBarrier.dstAccessMask |= imageBarrier.dstAccessMask;
+
+		imageBarriers.push_back(imageBarrier);
+	}
+
+	const uint32_t frame = context->get_frame_index();
+	vkCmdPipelineBarrier(frames[frame].draw_command_buffer, src_stage_mask, dst_stage_mask, 0, 0, nullptr,
+			0, nullptr, imageBarriers.size(), imageBarriers.ptr());
+/*
+	vkCmdPipelineBarrier(frames[frame].draw_command_buffer, src_stage_mask, dst_stage_mask, 0, 1u,
+			&memBarrier, 0, nullptr, imageBarriers.size(), imageBarriers.ptr());*/
+}
+
 void RenderingDeviceVulkan::full_barrier() {
 #ifndef DEBUG_ENABLED
 	ERR_PRINT("Full barrier is debug-only, should not be used in production");
@@ -9939,17 +9992,150 @@ static VkPipelineStageFlags godot_to_vk_stage_flags(
 	return retVal;
 }
 
+void RenderingDeviceVulkan::get_worst_case_use(uint32_t p_buffer_usage, ResourceAccess p_access,
+		BitField<ShaderStage> p_stage_mask, VkPipelineStageFlags &p_out_vk_stage,
+		VkAccessFlags &p_out_vk_access) {
+	if (p_stage_mask.has_flag(SHADER_STAGE_TRANSFER)) {
+		p_out_vk_stage |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+		if (p_access & RESOURCE_ACCESS_READ) {
+			p_out_vk_access |= VK_ACCESS_TRANSFER_READ_BIT;
+		}
+		if (p_access & RESOURCE_ACCESS_WRITE) {
+			p_out_vk_access |= VK_ACCESS_TRANSFER_WRITE_BIT;
+		}
+	}
+
+	if ((p_access & RESOURCE_ACCESS_READ) &&
+			(p_stage_mask &
+					(SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT |
+							SHADER_STAGE_TESSELATION_CONTROL_BIT |
+							SHADER_STAGE_TESSELATION_EVALUATION_BIT)) &&
+			p_buffer_usage & (VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT)) {
+		p_out_vk_stage |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+		p_out_vk_access |= VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+	}
+
+	if ((p_access & RESOURCE_ACCESS_READ) &&
+			(p_stage_mask &
+					(SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT |
+							SHADER_STAGE_TESSELATION_CONTROL_BIT |
+							SHADER_STAGE_TESSELATION_EVALUATION_BIT | SHADER_STAGE_COMPUTE_BIT)) &&
+			(p_buffer_usage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)) {
+		if (p_stage_mask.has_flag(SHADER_STAGE_VERTEX_BIT)) {
+			p_out_vk_stage |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+			p_out_vk_access |= VK_ACCESS_UNIFORM_READ_BIT;
+		}
+		if (p_stage_mask.has_flag(SHADER_STAGE_FRAGMENT_BIT)) {
+			p_out_vk_stage |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			p_out_vk_access |= VK_ACCESS_UNIFORM_READ_BIT;
+		}
+		if (p_stage_mask.has_flag(SHADER_STAGE_TESSELATION_CONTROL_BIT)) {
+			p_out_vk_stage |= VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT;
+			p_out_vk_access |= VK_ACCESS_UNIFORM_READ_BIT;
+		}
+		if (p_stage_mask.has_flag(SHADER_STAGE_TESSELATION_EVALUATION_BIT)) {
+			p_out_vk_stage |= VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT;
+			p_out_vk_access |= VK_ACCESS_UNIFORM_READ_BIT;
+		}
+		if (p_stage_mask.has_flag(SHADER_STAGE_COMPUTE_BIT)) {
+			p_out_vk_stage |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+			p_out_vk_access |= VK_ACCESS_UNIFORM_READ_BIT;
+		}
+	}
+
+	if ((p_stage_mask &
+				(SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT |
+						SHADER_STAGE_TESSELATION_CONTROL_BIT | SHADER_STAGE_TESSELATION_EVALUATION_BIT |
+						SHADER_STAGE_COMPUTE_BIT)) &&
+			(p_buffer_usage &
+					(VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
+							VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT))) {
+		VkAccessFlags access_flag = 0u;
+
+		if (p_access & RESOURCE_ACCESS_READ) {
+			access_flag |= VK_ACCESS_SHADER_READ_BIT;
+		}
+		if ((p_buffer_usage & VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT) &&
+				(p_access & RESOURCE_ACCESS_WRITE)) {
+			access_flag |= VK_ACCESS_SHADER_WRITE_BIT;
+		}
+
+		if (p_stage_mask.has_flag(SHADER_STAGE_VERTEX_BIT)) {
+			p_out_vk_stage |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+			p_out_vk_access |= access_flag;
+		}
+		if (p_stage_mask.has_flag(SHADER_STAGE_FRAGMENT_BIT)) {
+			p_out_vk_stage |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			p_out_vk_access |= access_flag;
+		}
+		if (p_stage_mask.has_flag(SHADER_STAGE_TESSELATION_CONTROL_BIT)) {
+			p_out_vk_stage |= VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT;
+			p_out_vk_access |= access_flag;
+		}
+		if (p_stage_mask.has_flag(SHADER_STAGE_TESSELATION_EVALUATION_BIT)) {
+			p_out_vk_stage |= VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT;
+			p_out_vk_access |= access_flag;
+		}
+		if (p_stage_mask.has_flag(SHADER_STAGE_COMPUTE_BIT)) {
+			p_out_vk_stage |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+			p_out_vk_access |= access_flag;
+		}
+	}
+
+	if ((p_access & RESOURCE_ACCESS_READ) &&
+			(p_stage_mask &
+					(SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT |
+							SHADER_STAGE_TESSELATION_CONTROL_BIT |
+							SHADER_STAGE_TESSELATION_EVALUATION_BIT)) &&
+			(p_buffer_usage & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT)) {
+		p_out_vk_stage |= VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+		p_out_vk_access |= VK_ACCESS_UNIFORM_READ_BIT;
+	}
+}
+
+void RenderingDeviceVulkan::queue_buffer_barrier(
+		RID p_buffer, ResourceAccess p_access, BitField<ShaderStage> p_stage_mask) {
+	DEV_ASSERT(p_access != RESOURCE_ACCESS_UNDEFINED);
+
+	ResourceStatusMap::Iterator itor = resource_status.find(p_buffer);
+
+	ResourceAccess old_access = RESOURCE_ACCESS_UNDEFINED;
+	uint8_t old_stage_mask = 0u;
+
+	VkPipelineStageFlags unused;
+	VkAccessFlags unused2;
+	BitField<BarrierMask> unused3;
+	Buffer *buffer = _get_buffer_from_owner(p_buffer, unused, unused2, unused3);
+
+	if (itor == resource_status.end()) {
+		ResourceStatus status = {};
+		status.layout = RESOURCE_LAYOUT_UNDEFINED;
+		status.access = p_access;
+		status.stage_mask = uint8_t(p_stage_mask);
+		resource_status.insert(p_buffer, status);
+		// No transition. There's nothing to wait for and unlike textures,
+		// buffers have no layout to transition to
+	} else {
+		old_access = itor->value.access;
+		old_stage_mask = itor->value.stage_mask;
+	}
+
+	if (p_access != RESOURCE_ACCESS_READ || old_access != RESOURCE_ACCESS_READ) {
+		get_worst_case_use(buffer->usage, old_access, old_stage_mask, current_buffer_barrier.src_access,
+				current_buffer_barrier.src_stage);
+
+		get_worst_case_use(buffer->usage, p_access, p_stage_mask, current_buffer_barrier.dst_access,
+				current_buffer_barrier.dst_stage);
+	}
+}
+
 void RenderingDeviceVulkan::execute_transitions() {
 	image_memory_barriers.reserve(resource_transitions.size());
 
 	VkPipelineStageFlags src_stage = 0u;
 	VkPipelineStageFlags dst_stage = 0u;
 
-	uint32_t buffer_src_barrier_bits = 0u;
-	uint32_t buffer_dst_barrier_bits = 0u;
-
 	for (const ResourceTransition &res_transition : resource_transitions) {
-		if (!res_transition.resource.is_null()) {
 			Texture *texture = texture_owner.get_or_null(res_transition.resource);
 
 			VkImageMemoryBarrier image_barrier = {};
@@ -10015,29 +10201,16 @@ void RenderingDeviceVulkan::execute_transitions() {
 			texture->layout = image_barrier.newLayout;
 
 			image_memory_barriers.push_back(image_barrier);
-		} else {
-			src_stage |= godot_to_vk_stage_flags(res_transition.old_stage_mask);
-			dst_stage |= godot_to_vk_stage_flags(res_transition.new_stage_mask);
-
-			if (res_transition.old_access & RESOURCE_ACCESS_WRITE) {
-				buffer_src_barrier_bits |= VK_ACCESS_SHADER_WRITE_BIT;
-			}
-
-			if (res_transition.new_access & RESOURCE_ACCESS_READ) {
-				buffer_dst_barrier_bits |= VK_ACCESS_SHADER_READ_BIT;
-			}
-			if (res_transition.new_access & RESOURCE_ACCESS_WRITE) {
-				buffer_dst_barrier_bits |= VK_ACCESS_SHADER_WRITE_BIT;
-			}
-		}
 	}
 
 	VkMemoryBarrier mem_barrier = {};
 	uint32_t num_mem_barriers = 0u;
-	if (buffer_src_barrier_bits || buffer_dst_barrier_bits) {
+	if (current_buffer_barrier.src_stage || current_buffer_barrier.dst_stage) {
 		mem_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-		mem_barrier.srcAccessMask = buffer_src_barrier_bits & src_valid_access_flags;
-		mem_barrier.dstAccessMask = buffer_dst_barrier_bits;
+		mem_barrier.srcAccessMask = current_buffer_barrier.src_access & src_valid_access_flags;
+		mem_barrier.dstAccessMask = current_buffer_barrier.dst_access;
+		src_stage |= current_buffer_barrier.src_stage;
+		dst_stage |= current_buffer_barrier.dst_stage;
 		num_mem_barriers = 1u;
 	}
 
@@ -10055,6 +10228,7 @@ void RenderingDeviceVulkan::execute_transitions() {
 
 	image_memory_barriers.clear();
 	resource_transitions.clear();
+	current_buffer_barrier = {};
 }
 
 RenderingDeviceVulkan::RenderingDeviceVulkan() {

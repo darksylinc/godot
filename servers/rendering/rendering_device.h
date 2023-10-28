@@ -100,6 +100,8 @@ public:
 		SHADER_STAGE_TESSELATION_CONTROL_BIT = (1 << SHADER_STAGE_TESSELATION_CONTROL),
 		SHADER_STAGE_TESSELATION_EVALUATION_BIT = (1 << SHADER_STAGE_TESSELATION_EVALUATION),
 		SHADER_STAGE_COMPUTE_BIT = (1 << SHADER_STAGE_COMPUTE),
+		// Not an actual shader stage. But we need this for barrier solving.
+		SHADER_STAGE_TRANSFER = (1 << SHADER_STAGE_MAX),
 	};
 
 	enum ShaderLanguage {
@@ -1307,8 +1309,31 @@ public:
 	virtual void submit() = 0;
 	virtual void sync() = 0;
 
-	void resolve_transition(RID p_texture, ResourceLayout p_new_layout, ResourceAccess p_access,
+	/// Queue barrier over the given texture. It will be executed when execute_transitions()
+	///	gets called.
+	/// \param p_texture
+	///		Texture to apply the barrier to.
+	/// \param p_new_layout
+	///		The new layout to transition to (can be the same as the current layout).
+	/// \param p_access
+	///		The access (i.e. Read and/or Write) that the next stages intend to use.
+	/// \param p_stage_mask
+	///		Which stages will be immediately accessing this buffer next,
+	///		after execute_transitions() is called.
+	void queue_resolve_transition(RID p_texture, ResourceLayout p_new_layout, ResourceAccess p_access,
 			BitField<ShaderStage> p_stage_mask);
+
+	/// Queue barrier over the given buffer. It will be executed when execute_transitions()
+	///	gets called.
+	/// \param p_buffer
+	///		Buffer to apply the barrier to.
+	/// \param p_access
+	///		The access (i.e. Read and/or Write) that the next stages intend to use.
+	/// \param p_stage_mask
+	///		Which stages will be immediately accessing this buffer next,
+	///		after execute_transitions() is called.
+	virtual void queue_buffer_barrier(
+			RID p_buffer, ResourceAccess p_access, BitField<ShaderStage> p_stage_mask) = 0;
 
 	enum MemoryType {
 		MEMORY_TEXTURES,
@@ -1415,13 +1440,13 @@ protected:
 		// If old_access == Undefined, it means there are no previous stage dependencies
 		// AND there is no guarantee previous contents will be preserved.
 		ResourceAccess old_access;
-		// new_access == Undefined is invalid
+		// new_access == Undefined is invalid.
 		ResourceAccess new_access;
 
 		// If old_stage_mask == Undefined, it means there are no previous
-		// stage dependencies (e.g. beginning of the frame)
+		// stage dependencies (e.g. beginning of the frame).
 		uint8_t old_stage_mask;
-		// If new_stage_mask == Undefined is invalid
+		// If new_stage_mask == Undefined is invalid.
 		uint8_t new_stage_mask;
 	};
 

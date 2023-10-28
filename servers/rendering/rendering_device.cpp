@@ -130,7 +130,7 @@ void RenderingDevice::debug_check_diverging_transition(
 }
 #endif
 
-void RenderingDevice::resolve_transition(RID p_texture, ResourceLayout p_new_layout,
+void RenderingDevice::queue_resolve_transition(RID p_texture, ResourceLayout p_new_layout,
 		ResourceAccess p_access, BitField<ShaderStage> p_stage_mask) {
 	DEV_ASSERT(p_new_layout != RESOURCE_LAYOUT_UNDEFINED);
 	DEV_ASSERT(p_access != RESOURCE_ACCESS_UNDEFINED);
@@ -154,8 +154,6 @@ void RenderingDevice::resolve_transition(RID p_texture, ResourceLayout p_new_lay
 					   (p_new_layout == RESOURCE_LAYOUT_RENDERTARGET_READ_ONLY &&
 							   p_access == RESOURCE_ACCESS_READ)) &&
 			"Invalid Layout-access pair");
-
-	DEV_ASSERT(p_access != RESOURCE_ACCESS_UNDEFINED);
 
 	ResourceStatusMap::Iterator itor = resource_status.find(p_texture);
 

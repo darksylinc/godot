@@ -1290,10 +1290,41 @@ public:
 	static VkAccessFlags get_access_flags(
 			ResourceLayout p_layout, ResourceAccess p_access, const Texture *p_texture);
 
+	/// Given p_buffer_usage, p_access & p_stage_mask, calculate the necessary flag barriers.
+	///
+	/// \param p_buffer_usage
+	///		What buffer usages is this buffer allowed to be used on.
+	/// \param p_access
+	///		Access we intend to give to the buffer if dst
+	///		(or the use that was given in the past, if src).
+	/// \param p_stage_mask
+	///		Stages the buffer will be involved into if dst (or was involved if src).
+	/// \param[out] p_out_vk_stage
+	///		Same as p_out_stage_mask, but using Vulkan flags.
+	/// \param[out] p_out_vk_access
+	///		Same as p_out_access, but using Vulkan flags.
+	static void get_worst_case_use(uint32_t p_buffer_usage, ResourceAccess p_access,
+			BitField<ShaderStage> p_stage_mask, VkPipelineStageFlags &p_out_vk_stage,
+			VkAccessFlags &p_out_vk_access);
+
+	virtual void queue_buffer_barrier(
+			RID p_buffer, ResourceAccess p_access, BitField<ShaderStage> p_stage_mask);
+
 	void execute_transitions();
 
 protected:
 	VkImageLayout get(ResourceLayout layout, const Texture *tex) const;
+
+	struct CurrentBufferBarrier
+	{
+		VkPipelineStageFlags src_stage;
+		VkPipelineStageFlags dst_stage;
+
+		VkAccessFlags src_access;
+		VkAccessFlags dst_access;
+	};
+
+	CurrentBufferBarrier current_buffer_barrier = {};
 
 public:
 	RenderingDeviceVulkan();
