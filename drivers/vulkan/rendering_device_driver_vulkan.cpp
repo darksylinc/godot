@@ -2331,6 +2331,7 @@ RDD::RenderPassID RenderingDeviceDriverVulkan::render_pass_create(VectorView<Att
 	VkSubpassDependency2KHR *vk_subpass_dependencies = ALLOCA_ARRAY(VkSubpassDependency2KHR, p_subpass_dependencies.size());
 	for (uint32_t i = 0; i < p_subpass_dependencies.size(); i++) {
 		vk_subpass_dependencies[i] = {};
+		vk_subpass_dependencies[i].sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2;
 		vk_subpass_dependencies[i].srcSubpass = p_subpass_dependencies[i].src_subpass;
 		vk_subpass_dependencies[i].dstSubpass = p_subpass_dependencies[i].dst_subpass;
 		vk_subpass_dependencies[i].srcStageMask = (VkPipelineStageFlags)p_subpass_dependencies[i].src_stages;
