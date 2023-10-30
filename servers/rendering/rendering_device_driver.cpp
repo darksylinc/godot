@@ -161,9 +161,19 @@ Error RenderingDeviceDriver::_reflect_spirv(VectorView<ShaderStageSPIRVData> p_s
 					}
 
 					if (may_be_writable) {
-						uniform.writable = !(binding.type_description->decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE) && !(binding.block.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE);
+						if ((binding.type_description->decoration_flags &
+									SPV_REFLECT_DECORATION_NON_WRITABLE) &&
+								!(binding.block.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE)) {
+							uniform.access = ACCESS_READ;
+						} else if ((binding.type_description->decoration_flags &
+										   SPV_REFLECT_DECORATION_NON_READABLE) &&
+								!(binding.block.decoration_flags & SPV_REFLECT_DECORATION_NON_READABLE)) {
+							uniform.access = ACCESS_WRITE;
+						} else {
+							uniform.access = ACCESS_READ_WRITE;
+						}
 					} else {
-						uniform.writable = false;
+						uniform.access = ACCESS_READ;
 					}
 
 					uniform.binding = binding.binding;
@@ -185,9 +195,9 @@ Error RenderingDeviceDriver::_reflect_spirv(VectorView<ShaderStageSPIRVData> p_s
 								ERR_FAIL_COND_V_MSG(r_reflection.uniform_sets[set][k].length != uniform.length, FAILED,
 										"On shader stage '" + String(SHADER_STAGE_NAMES[stage]) + "', uniform '" + binding.name + "' trying to reuse location for set=" + itos(set) + ", binding=" + itos(uniform.binding) + " with different uniform size.");
 
-								// Also, verify that it has the same writability.
-								ERR_FAIL_COND_V_MSG(r_reflection.uniform_sets[set][k].writable != uniform.writable, FAILED,
-										"On shader stage '" + String(SHADER_STAGE_NAMES[stage]) + "', uniform '" + binding.name + "' trying to reuse location for set=" + itos(set) + ", binding=" + itos(uniform.binding) + " with different writability.");
+								// Also, verify that it has the same access.
+								ERR_FAIL_COND_V_MSG(r_reflection.uniform_sets[set][k].access != uniform.access, FAILED,
+										"On shader stage '" + String(SHADER_STAGE_NAMES[stage]) + "', uniform '" + binding.name + "' trying to reuse location for set=" + itos(set) + ", binding=" + itos(uniform.binding) + " with different access.");
 
 								// Just append stage mask and return.
 								r_reflection.uniform_sets.write[set].write[k].stages.set_flag(stage_flag);

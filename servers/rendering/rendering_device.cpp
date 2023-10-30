@@ -2895,7 +2895,22 @@ String RenderingDevice::_shader_uniform_debug(RID p_shader, int p_set) {
 			if (!ret.is_empty()) {
 				ret += "\n";
 			}
-			ret += "Set: " + itos(i) + " Binding: " + itos(ui.binding) + " Type: " + SHADER_UNIFORM_NAMES[ui.type] + " Writable: " + (ui.writable ? "Y" : "N") + " Length: " + itos(ui.length);
+			ret += "Set: " + itos(i) + " Binding: " + itos(ui.binding) + " Type: " + SHADER_UNIFORM_NAMES[ui.type] + " Access: ";
+			switch (ui.access) {
+				case ACCESS_UNDEFINED:
+					ret += "Undefined";
+					break;
+				case ACCESS_READ:
+					ret += "R";
+					break;
+				case ACCESS_WRITE:
+					ret += "W";
+					break;
+				case ACCESS_READ_WRITE:
+					ret += "RW";
+					break;
+			}
+			ret += " Length: " + itos(ui.length);
 		}
 	}
 	return ret;

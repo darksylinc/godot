@@ -816,6 +816,13 @@ public:
 		SUPPORTS_FRAGMENT_SHADER_WITH_ONLY_SIDE_EFFECTS,
 	};
 
+	enum ResourceAccess {
+		ACCESS_UNDEFINED = 0x00,
+		ACCESS_READ = 0x01,
+		ACCESS_WRITE = 0x02,
+		ACCESS_READ_WRITE = ACCESS_READ | ACCESS_WRITE
+	};
+
 	////////////////////////////////////////////
 	// PROTECTED STUFF
 	// Not exposed by RenderingDevice, but shared
@@ -865,13 +872,13 @@ protected:
 
 	struct ShaderUniform {
 		UniformType type = UniformType::UNIFORM_TYPE_MAX;
-		bool writable = false;
+		ResourceAccess access = ACCESS_UNDEFINED;
 		uint32_t binding = 0;
 		BitField<ShaderStage> stages;
 		uint32_t length = 0; // Size of arrays (in total elements), or ubos (in bytes * total elements).
 
 		bool operator!=(const ShaderUniform &p_other) const {
-			return binding != p_other.binding || type != p_other.type || writable != p_other.writable || stages != p_other.stages || length != p_other.length;
+			return binding != p_other.binding || type != p_other.type || access != p_other.access || stages != p_other.stages || length != p_other.length;
 		}
 
 		bool operator<(const ShaderUniform &p_other) const {
@@ -881,8 +888,8 @@ protected:
 			if (type != p_other.type) {
 				return type < p_other.type;
 			}
-			if (writable != p_other.writable) {
-				return writable < p_other.writable;
+			if (access != p_other.access) {
+				return access < p_other.access;
 			}
 			if (stages != p_other.stages) {
 				return stages < p_other.stages;

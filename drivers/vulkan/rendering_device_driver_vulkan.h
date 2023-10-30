@@ -206,7 +206,7 @@ private:
 			uint32_t binding = 0;
 			uint32_t stages = 0;
 			uint32_t length = 0; // Size of arrays (in total elements), or UBOs (in bytes * total elements).
-			uint32_t writable = 0;
+			uint32_t access = 0;
 		};
 
 		struct SpecializationConstant {

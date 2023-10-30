@@ -1042,7 +1042,7 @@ Vector<uint8_t> RenderingDeviceDriverVulkan::shader_compile_binary_from_spirv(Ve
 				binding.binding = uniform_refl.binding;
 				binding.stages = (uint32_t)uniform_refl.stages;
 				binding.length = uniform_refl.length;
-				binding.writable = (uint32_t)uniform_refl.writable;
+				binding.access = (uint32_t)uniform_refl.access;
 				set_bindings.push_back(binding);
 			}
 			uniforms.push_back(set_bindings);
@@ -1246,7 +1246,7 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 		for (uint32_t j = 0; j < set_count; j++) {
 			ShaderUniform info;
 			info.type = UniformType(set_ptr[j].type);
-			info.writable = set_ptr[j].writable;
+			info.access = static_cast<ResourceAccess>(set_ptr[j].access);
 			info.length = set_ptr[j].length;
 			info.binding = set_ptr[j].binding;
 			info.stages = set_ptr[j].stages;
