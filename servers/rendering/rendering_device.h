@@ -1228,7 +1228,6 @@ public:
 	virtual void compute_list_end(BitField<BarrierMask> p_post_barrier = BARRIER_MASK_ALL_BARRIERS) = 0;
 
 	virtual void barrier(BitField<BarrierMask> p_from = BARRIER_MASK_ALL_BARRIERS, BitField<BarrierMask> p_to = BARRIER_MASK_ALL_BARRIERS) = 0;
-	virtual void prepareMsaaForCompute(LocalVector<RID> p_textures) = 0;
 	virtual void full_barrier() = 0;
 
 	/***************/

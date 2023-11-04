@@ -8457,59 +8457,6 @@ void RenderingDeviceVulkan::barrier(BitField<BarrierMask> p_from, BitField<Barri
 	_memory_barrier(src_barrier_flags, dst_barrier_flags, src_access_flags, dst_access_flags, true);
 }
 
-void RenderingDeviceVulkan::prepareMsaaForCompute(LocalVector<RID> p_textures) {
-	const VkPipelineStageFlags src_stage_mask = /*VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-			VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT*/
-			VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
-	const VkPipelineStageFlags dst_stage_mask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-
-	LocalVector<VkImageMemoryBarrier> imageBarriers;
-	imageBarriers.reserve(p_textures.size());
-
-	VkMemoryBarrier memBarrier = {};
-	memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-
-	for( const RID rid : p_textures )
-	{
-		Texture *texture = texture_owner.get_or_null(rid);
-
-		VkImageMemoryBarrier imageBarrier = {};
-		imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		if (texture->barrier_aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT) {
-			imageBarrier.srcAccessMask =
-					VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-		} else {
-			imageBarrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-					VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-		}
-		if (texture->usage_flags & (TEXTURE_USAGE_STORAGE_BIT | TEXTURE_USAGE_STORAGE_ATOMIC_BIT)) {
-			imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-		} else {
-			imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		}
-		imageBarrier.oldLayout = texture->layout;
-		imageBarrier.newLayout = texture->layout;
-		imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		imageBarrier.image = texture->image;
-		imageBarrier.subresourceRange.aspectMask = texture->barrier_aspect_mask;
-		imageBarrier.subresourceRange.levelCount = texture->mipmaps;
-		imageBarrier.subresourceRange.layerCount = texture->layers;
-
-		memBarrier.srcAccessMask |= imageBarrier.srcAccessMask;
-		memBarrier.dstAccessMask |= imageBarrier.dstAccessMask;
-
-		imageBarriers.push_back(imageBarrier);
-	}
-
-	const uint32_t frame = context->get_frame_index();
-	vkCmdPipelineBarrier(frames[frame].draw_command_buffer, src_stage_mask, dst_stage_mask, 0, 0, nullptr,
-			0, nullptr, imageBarriers.size(), imageBarriers.ptr());
-/*
-	vkCmdPipelineBarrier(frames[frame].draw_command_buffer, src_stage_mask, dst_stage_mask, 0, 1u,
-			&memBarrier, 0, nullptr, imageBarriers.size(), imageBarriers.ptr());*/
-}
-
 void RenderingDeviceVulkan::full_barrier() {
 #ifndef DEBUG_ENABLED
 	ERR_PRINT("Full barrier is debug-only, should not be used in production");
