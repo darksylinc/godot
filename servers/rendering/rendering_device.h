@@ -1412,7 +1412,7 @@ protected:
 			uint32_t binding;
 			BitField<ShaderStage> stages_mask;
 			uint32_t length; // Size of arrays (in total elements), or ubos (in bytes * total elements).
-			bool writable;
+			ResourceAccess access;
 		};
 		Vector<Vector<Uniform>> uniforms;
 

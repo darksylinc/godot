@@ -4643,7 +4643,22 @@ String RenderingDeviceVulkan::_shader_uniform_debug(RID p_shader, int p_set) {
 			if (!ret.is_empty()) {
 				ret += "\n";
 			}
-			ret += "Set: " + itos(i) + " Binding: " + itos(ui.binding) + " Type: " + shader_uniform_names[ui.type] + " Writable: " + (ui.writable ? "Y" : "N") + " Length: " + itos(ui.length);
+			ret += "Set: " + itos(i) + " Binding: " + itos(ui.binding) + " Type: " + shader_uniform_names[ui.type] + " Access: ";
+			switch (ui.access) {
+				case RESOURCE_ACCESS_UNDEFINED:
+					ret += "Undefined";
+					break;
+				case RESOURCE_ACCESS_READ:
+					ret += "R";
+					break;
+				case RESOURCE_ACCESS_WRITE:
+					ret += "W";
+					break;
+				case RESOURCE_ACCESS_READ_WRITE:
+					ret += "RW";
+					break;
+			}
+			ret += " Length: " + itos(ui.length);
 		}
 	}
 	return ret;
@@ -4664,7 +4679,7 @@ struct RenderingDeviceVulkanShaderBinaryDataBinding {
 	uint32_t binding;
 	uint32_t stages;
 	uint32_t length; // Size of arrays (in total elements), or ubos (in bytes * total elements).
-	uint32_t writable;
+	uint32_t access;
 };
 
 struct RenderingDeviceVulkanShaderBinarySpecializationConstant {
@@ -4728,7 +4743,7 @@ Vector<uint8_t> RenderingDeviceVulkan::shader_compile_binary_from_spirv(const Ve
 				binding.binding = spirv_uniform.binding;
 				binding.stages = (uint32_t)spirv_uniform.stages_mask;
 				binding.length = spirv_uniform.length;
-				binding.writable = (uint32_t)spirv_uniform.writable;
+				binding.access = (uint32_t)spirv_uniform.access;
 				set_bindings.push_back(binding);
 			}
 			uniform_info.push_back(set_bindings);
@@ -4932,7 +4947,7 @@ RID RenderingDeviceVulkan::shader_create_from_bytecode(const Vector<uint8_t> &p_
 		for (uint32_t j = 0; j < set_count; j++) {
 			UniformInfo info;
 			info.type = UniformType(set_ptr[j].type);
-			info.writable = set_ptr[j].writable;
+			info.access = static_cast<ResourceAccess>(set_ptr[j].access);
 			info.length = set_ptr[j].length;
 			info.binding = set_ptr[j].binding;
 			info.stages = set_ptr[j].stages;

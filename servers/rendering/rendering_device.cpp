@@ -641,9 +641,19 @@ Error RenderingDevice::_reflect_spirv(const Vector<ShaderStageSPIRVData> &p_spir
 					}
 
 					if (may_be_writable) {
-						info.writable = !(binding.type_description->decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE) && !(binding.block.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE);
+						if ((binding.type_description->decoration_flags &
+									SPV_REFLECT_DECORATION_NON_WRITABLE) &&
+								!(binding.block.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE)) {
+							info.access = RESOURCE_ACCESS_READ;
+						} else if ((binding.type_description->decoration_flags &
+										   SPV_REFLECT_DECORATION_NON_READABLE) &&
+								!(binding.block.decoration_flags & SPV_REFLECT_DECORATION_NON_READABLE)) {
+							info.access = RESOURCE_ACCESS_WRITE;
+						} else {
+							info.access = RESOURCE_ACCESS_READ_WRITE;
+						}
 					} else {
-						info.writable = false;
+						info.access = RESOURCE_ACCESS_READ;
 					}
 
 					info.binding = binding.binding;
@@ -666,8 +676,8 @@ Error RenderingDevice::_reflect_spirv(const Vector<ShaderStageSPIRVData> &p_spir
 										"On shader stage '" + String(shader_stage_names[stage]) + "', uniform '" + binding.name + "' trying to reuse location for set=" + itos(set) + ", binding=" + itos(info.binding) + " with different uniform size.");
 
 								// Also, verify that it has the same writability.
-								ERR_FAIL_COND_V_MSG(r_reflection_data.uniforms[set][k].writable != info.writable, FAILED,
-										"On shader stage '" + String(shader_stage_names[stage]) + "', uniform '" + binding.name + "' trying to reuse location for set=" + itos(set) + ", binding=" + itos(info.binding) + " with different writability.");
+								ERR_FAIL_COND_V_MSG(r_reflection_data.uniforms[set][k].access != info.access, FAILED,
+										"On shader stage '" + String(shader_stage_names[stage]) + "', uniform '" + binding.name + "' trying to reuse location for set=" + itos(set) + ", binding=" + itos(info.binding) + " with different access.");
 
 								// Just append stage mask and return.
 								r_reflection_data.uniforms.write[set].write[k].stages_mask.set_flag(stage_flag);
