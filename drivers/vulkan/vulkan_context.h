@@ -135,8 +135,8 @@ private:
 	VkQueue present_queue = VK_NULL_HANDLE;
 	VkColorSpaceKHR color_space;
 	VkFormat format;
-	VkSemaphore draw_complete_semaphores[MAX_FRAME_LAG] = {};
-	VkSemaphore image_ownership_semaphores[MAX_FRAME_LAG] = {};
+	VkSemaphore draw_complete_semaphore = {};
+	VkSemaphore image_ownership_semaphore = {}; // For separate queues
 	uint32_t frame_index = 0;
 	// Initialize to 0 because we don't want it to be used before we initialize and read the config
 	// (this value must stay constant throghout VulkanContext's & RenderingDevice's lifetime).
@@ -159,7 +159,7 @@ private:
 		VkSwapchainKHR swapchain = VK_NULL_HANDLE;
 		SwapchainImageResources *swapchain_image_resources = VK_NULL_HANDLE;
 		VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-		VkSemaphore image_acquired_semaphores[MAX_FRAME_LAG] = {};
+		VkSemaphore image_acquired_semaphore = {};
 		bool semaphore_acquired = false;
 		uint32_t current_buffer = 0;
 		int width = 0;

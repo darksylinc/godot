@@ -980,6 +980,19 @@ class RenderingDeviceVulkan : public RenderingDevice {
 #endif
 	};
 
+	// TODO: Begin this goes away after ARG (Acyclic Render Graph).
+	enum CurrentModeFlags
+	{
+		LISTS_CLOSED,
+		DRAW_LIST_OPEN = 1u << 0u,
+		DRAW_LIST_NEEDS_BARRIER = 1u << 1u,
+		COMPUTE_LIST_OPEN = 1u << 2u,
+		COMPUTE_LIST_NEEDS_BARRIER = 1u << 3u,
+	};
+
+	BitField<CurrentModeFlags> current_mode = LISTS_CLOSED;
+	// TODO: End this goes away after ARG.
+
 	ComputeList *compute_list = nullptr;
 
 	void _compute_list_add_barrier(BitField<BarrierMask> p_post_barrier, uint32_t p_barrier_flags, uint32_t p_access_flags);
@@ -1224,6 +1237,9 @@ public:
 
 	virtual void barrier(BitField<BarrierMask> p_from = BARRIER_MASK_ALL_BARRIERS, BitField<BarrierMask> p_to = BARRIER_MASK_ALL_BARRIERS);
 	virtual void full_barrier();
+
+	void to_graphics_barrier();
+	void to_compute_barrier();
 
 	/**************/
 	/**** FREE ****/

@@ -1683,17 +1683,17 @@ Error VulkanContext::_create_semaphores() {
 
 	CRASH_COND_MSG(frame_count == 0, "Used before initialization.");
 
+	err = vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &draw_complete_semaphore);
+	ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
+
+	if (separate_present_queue) {
+		err = vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &image_ownership_semaphore);
+		ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
+	}
+
 	for (uint32_t i = 0; i < frame_count; i++) {
 		err = vkCreateFence(device, &fence_ci, nullptr, &fences[i]);
 		ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
-
-		err = vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &draw_complete_semaphores[i]);
-		ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
-
-		if (separate_present_queue) {
-			err = vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &image_ownership_semaphores[i]);
-			ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
-		}
 	}
 	frame_index = 0;
 
@@ -1746,9 +1746,6 @@ Error VulkanContext::_window_create(DisplayServer::WindowID p_window_id, Display
 	window.width = p_width;
 	window.height = p_height;
 	window.vsync_mode = p_vsync_mode;
-	for (size_t i = 0u; i < MAX_FRAME_LAG; ++i) {
-		window.image_acquired_semaphores[i] = VK_NULL_HANDLE;
-	}
 	Error err = _update_swap_chain(&window);
 	ERR_FAIL_COND_V(err != OK, ERR_CANT_CREATE);
 
@@ -1841,14 +1838,14 @@ Error VulkanContext::_clean_up_swap_chain(Window *window) {
 	}
 
 	for (uint32_t i = 0; i < frame_count; i++) {
-		if (window->image_acquired_semaphores[i] != VK_NULL_HANDLE) {
+		if (window->image_acquired_semaphore != VK_NULL_HANDLE) {
 			// Destroy the semaphores now (we'll re-create it later if we have to).
 			// We must do this because the semaphore cannot be reused if it's in a signaled state
 			// (which happens if vkAcquireNextImageKHR returned VK_ERROR_OUT_OF_DATE_KHR or
 			// VK_SUBOPTIMAL_KHR) The only way to reset it would be to present the swapchain...
 			// the one we just destroyed. And the API has no way to "unsignal" the semaphore.
-			vkDestroySemaphore(device, window->image_acquired_semaphores[i], nullptr);
-			window->image_acquired_semaphores[i] = VK_NULL_HANDLE;
+			vkDestroySemaphore(device, window->image_acquired_semaphore, nullptr);
+			window->image_acquired_semaphore = VK_NULL_HANDLE;
 		}
 	}
 
@@ -2238,10 +2235,8 @@ Error VulkanContext::_update_swap_chain(Window *window) {
 
 	CRASH_COND_MSG(frame_count == 0, "Used before initialization.");
 
-	for (uint32_t i = 0; i < frame_count; i++) {
-		VkResult vkerr = vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &window->image_acquired_semaphores[i]);
-		ERR_FAIL_COND_V(vkerr, ERR_CANT_CREATE);
-	}
+	VkResult vkerr = vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &window->image_acquired_semaphore);
+	ERR_FAIL_COND_V(vkerr, ERR_CANT_CREATE);
 
 	return OK;
 }
@@ -2294,7 +2289,7 @@ void VulkanContext::flush(bool p_flush_setup, bool p_flush_pending) {
 		submit_info.commandBufferCount = 1;
 		submit_info.pCommandBuffers = command_buffer_queue.ptr();
 		submit_info.signalSemaphoreCount = pending_flushable ? 1 : 0;
-		submit_info.pSignalSemaphores = pending_flushable ? &draw_complete_semaphores[frame_index] : nullptr;
+		submit_info.pSignalSemaphores = pending_flushable ? &draw_complete_semaphore : nullptr;
 		VkResult err = vkQueueSubmit(graphics_queue, 1, &submit_info, VK_NULL_HANDLE);
 		command_buffer_queue.write[0] = nullptr;
 		ERR_FAIL_COND(err);
@@ -2309,7 +2304,7 @@ void VulkanContext::flush(bool p_flush_setup, bool p_flush_pending) {
 		VkPipelineStageFlags wait_stage_mask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 		submit_info.pWaitDstStageMask = setup_flushable ? &wait_stage_mask : nullptr;
 		submit_info.waitSemaphoreCount = setup_flushable ? 1 : 0;
-		submit_info.pWaitSemaphores = setup_flushable ? &draw_complete_semaphores[frame_index] : nullptr;
+		submit_info.pWaitSemaphores = setup_flushable ? &draw_complete_semaphore : nullptr;
 		submit_info.commandBufferCount = command_buffer_count - 1;
 		submit_info.pCommandBuffers = command_buffer_queue.ptr() + 1;
 		submit_info.signalSemaphoreCount = 0;
@@ -2342,7 +2337,7 @@ Error VulkanContext::prepare_buffers() {
 			// Get the index of the next available swapchain image.
 			err =
 					fpAcquireNextImageKHR(device, w->swapchain, UINT64_MAX,
-							w->image_acquired_semaphores[frame_index], VK_NULL_HANDLE, &w->current_buffer);
+							w->image_acquired_semaphore, VK_NULL_HANDLE, &w->current_buffer);
 
 			if (err == VK_ERROR_OUT_OF_DATE_KHR) {
 				// Swapchain is out of date (e.g. the window was resized) and
@@ -2419,7 +2414,7 @@ Error VulkanContext::swap_buffers() {
 		Window *w = &E.value;
 
 		if (w->semaphore_acquired) {
-			semaphores_to_acquire[semaphores_to_acquire_count] = w->image_acquired_semaphores[frame_index];
+			semaphores_to_acquire[semaphores_to_acquire_count] = w->image_acquired_semaphore;
 			pipe_stage_flags[semaphores_to_acquire_count] = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 			semaphores_to_acquire_count++;
 		}
@@ -2434,7 +2429,7 @@ Error VulkanContext::swap_buffers() {
 	submit_info.commandBufferCount = commands_to_submit;
 	submit_info.pCommandBuffers = commands_ptr;
 	submit_info.signalSemaphoreCount = 1;
-	submit_info.pSignalSemaphores = &draw_complete_semaphores[frame_index];
+	submit_info.pSignalSemaphores = &draw_complete_semaphore;
 	vkResetFences(device, 1, &fences[frame_index]);
 	err = vkQueueSubmit(graphics_queue, 1, &submit_info, fences[frame_index]);
 	ERR_FAIL_COND_V_MSG(err, ERR_CANT_CREATE, "Vulkan: Cannot submit graphics queue. Error code: " + String(string_VkResult(err)));
@@ -2449,7 +2444,7 @@ Error VulkanContext::swap_buffers() {
 		VkFence nullFence = VK_NULL_HANDLE;
 		pipe_stage_flags[0] = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 		submit_info.waitSemaphoreCount = 1;
-		submit_info.pWaitSemaphores = &draw_complete_semaphores[frame_index];
+		submit_info.pWaitSemaphores = &draw_complete_semaphore;
 		submit_info.commandBufferCount = 0;
 
 		VkCommandBuffer *cmdbufptr = (VkCommandBuffer *)alloca(sizeof(VkCommandBuffer *) * windows.size());
@@ -2466,7 +2461,7 @@ Error VulkanContext::swap_buffers() {
 		}
 
 		submit_info.signalSemaphoreCount = 1;
-		submit_info.pSignalSemaphores = &image_ownership_semaphores[frame_index];
+		submit_info.pSignalSemaphores = &image_ownership_semaphore;
 		err = vkQueueSubmit(present_queue, 1, &submit_info, nullFence);
 		ERR_FAIL_COND_V_MSG(err, ERR_CANT_CREATE, "Vulkan: Cannot submit present queue. Error code: " + String(string_VkResult(err)));
 	}
@@ -2477,7 +2472,7 @@ Error VulkanContext::swap_buffers() {
 		/*sType*/ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
 		/*pNext*/ nullptr,
 		/*waitSemaphoreCount*/ 1,
-		/*pWaitSemaphores*/ (separate_present_queue) ? &image_ownership_semaphores[frame_index] : &draw_complete_semaphores[frame_index],
+		/*pWaitSemaphores*/ (separate_present_queue) ? &image_ownership_semaphore : &draw_complete_semaphore,
 		/*swapchainCount*/ 0,
 		/*pSwapchain*/ nullptr,
 		/*pImageIndices*/ nullptr,
@@ -2829,10 +2824,10 @@ VulkanContext::~VulkanContext() {
 	if (device_initialized) {
 		for (uint32_t i = 0; i < frame_count; i++) {
 			vkDestroyFence(device, fences[i], nullptr);
-			vkDestroySemaphore(device, draw_complete_semaphores[i], nullptr);
-			if (separate_present_queue) {
-				vkDestroySemaphore(device, image_ownership_semaphores[i], nullptr);
-			}
+		}
+		vkDestroySemaphore(device, draw_complete_semaphore, nullptr);
+		if (separate_present_queue) {
+			vkDestroySemaphore(device, image_ownership_semaphore, nullptr);
 		}
 		if (inst_initialized && is_instance_extension_enabled(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
 			DestroyDebugUtilsMessengerEXT(inst, dbg_messenger, nullptr);

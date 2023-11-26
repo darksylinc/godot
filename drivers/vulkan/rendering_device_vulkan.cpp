@@ -1658,6 +1658,11 @@ void RenderingDeviceVulkan::_full_barrier(bool p_sync_with_draw) {
 					VK_ACCESS_HOST_READ_BIT |
 					VK_ACCESS_HOST_WRITE_BIT,
 			p_sync_with_draw);
+
+	if (p_sync_with_draw) {
+		current_mode.clear_flag(DRAW_LIST_NEEDS_BARRIER);
+		current_mode.clear_flag(COMPUTE_LIST_NEEDS_BARRIER);
+	}
 }
 
 void RenderingDeviceVulkan::_buffer_memory_barrier(VkBuffer buffer, uint64_t p_from, uint64_t p_size, VkPipelineStageFlags p_src_stage_mask, VkPipelineStageFlags p_dst_stage_mask, VkAccessFlags p_src_access, VkAccessFlags p_dst_access, bool p_sync_with_draw) {
@@ -3181,45 +3186,51 @@ Error RenderingDeviceVulkan::texture_resolve_multisample(RID p_from_texture, RID
 	{
 		// PRE Copy the image.
 
-		{ // Source.
-			VkImageMemoryBarrier image_memory_barrier;
-			image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			image_memory_barrier.pNext = nullptr;
-			image_memory_barrier.srcAccessMask = 0;
-			image_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-			image_memory_barrier.oldLayout = src_tex->layout;
-			image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		{
+			VkImageMemoryBarrier image_memory_barrier[2];
+			// Source.
+			image_memory_barrier[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			image_memory_barrier[0].pNext = nullptr;
+			image_memory_barrier[0].srcAccessMask = 0;
+			image_memory_barrier[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+			image_memory_barrier[0].oldLayout = src_tex->layout;
+			image_memory_barrier[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 
-			image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			image_memory_barrier.image = src_tex->image;
-			image_memory_barrier.subresourceRange.aspectMask = src_tex->barrier_aspect_mask;
-			image_memory_barrier.subresourceRange.baseMipLevel = src_tex->base_mipmap;
-			image_memory_barrier.subresourceRange.levelCount = 1;
-			image_memory_barrier.subresourceRange.baseArrayLayer = src_tex->base_layer;
-			image_memory_barrier.subresourceRange.layerCount = 1;
+			image_memory_barrier[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier[0].image = src_tex->image;
+			image_memory_barrier[0].subresourceRange.aspectMask = src_tex->barrier_aspect_mask;
+			image_memory_barrier[0].subresourceRange.baseMipLevel = src_tex->base_mipmap;
+			image_memory_barrier[0].subresourceRange.levelCount = 1;
+			image_memory_barrier[0].subresourceRange.baseArrayLayer = src_tex->base_layer;
+			image_memory_barrier[0].subresourceRange.layerCount = 1;
 
-			vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &image_memory_barrier);
-		}
-		{ // Dest.
-			VkImageMemoryBarrier image_memory_barrier;
-			image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			image_memory_barrier.pNext = nullptr;
-			image_memory_barrier.srcAccessMask = 0;
-			image_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			image_memory_barrier.oldLayout = dst_tex->layout;
-			image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+			// Dest.
+			image_memory_barrier[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			image_memory_barrier[1].pNext = nullptr;
+			image_memory_barrier[1].srcAccessMask = 0;
+			image_memory_barrier[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			image_memory_barrier[1].oldLayout = dst_tex->layout;
+			image_memory_barrier[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
-			image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			image_memory_barrier.image = dst_tex->image;
-			image_memory_barrier.subresourceRange.aspectMask = dst_tex->read_aspect_mask;
-			image_memory_barrier.subresourceRange.baseMipLevel = dst_tex->base_mipmap;
-			image_memory_barrier.subresourceRange.levelCount = 1;
-			image_memory_barrier.subresourceRange.baseArrayLayer = dst_tex->base_layer;
-			image_memory_barrier.subresourceRange.layerCount = 1;
+			image_memory_barrier[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier[1].image = dst_tex->image;
+			image_memory_barrier[1].subresourceRange.aspectMask = dst_tex->read_aspect_mask;
+			image_memory_barrier[1].subresourceRange.baseMipLevel = dst_tex->base_mipmap;
+			image_memory_barrier[1].subresourceRange.levelCount = 1;
+			image_memory_barrier[1].subresourceRange.baseArrayLayer = dst_tex->base_layer;
+			image_memory_barrier[1].subresourceRange.layerCount = 1;
 
-			vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &image_memory_barrier);
+			// TODO: Begin this goes away after ARG (Acyclic Render Graph).
+			VkPipelineStageFlags src_stage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+			if (current_mode.has_flag(DRAW_LIST_NEEDS_BARRIER)) {
+				image_memory_barrier[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+				src_stage = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
+			}
+			// TODO: End this goes away after ARG.
+
+			vkCmdPipelineBarrier(command_buffer, src_stage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, image_memory_barrier);
 		}
 
 		// COPY.
@@ -3274,46 +3285,42 @@ Error RenderingDeviceVulkan::texture_resolve_multisample(RID p_from_texture, RID
 			barrier_flags = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 		}
 
-		{ // Restore src.
-			VkImageMemoryBarrier image_memory_barrier;
-			image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			image_memory_barrier.pNext = nullptr;
-			image_memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-			image_memory_barrier.dstAccessMask = access_flags;
-			image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-			image_memory_barrier.newLayout = src_tex->layout;
-			image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			image_memory_barrier.image = src_tex->image;
-			image_memory_barrier.subresourceRange.aspectMask = src_tex->barrier_aspect_mask;
-			image_memory_barrier.subresourceRange.baseMipLevel = src_tex->base_mipmap;
-			image_memory_barrier.subresourceRange.levelCount = 1;
-			image_memory_barrier.subresourceRange.baseArrayLayer = src_tex->base_layer;
-			image_memory_barrier.subresourceRange.layerCount = 1;
+		{
+			// Restore src.
+			VkImageMemoryBarrier image_memory_barrier[2];
+			image_memory_barrier[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			image_memory_barrier[0].pNext = nullptr;
+			image_memory_barrier[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+			image_memory_barrier[0].dstAccessMask = access_flags;
+			image_memory_barrier[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+			image_memory_barrier[0].newLayout = src_tex->layout;
+			image_memory_barrier[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier[0].image = src_tex->image;
+			image_memory_barrier[0].subresourceRange.aspectMask = src_tex->barrier_aspect_mask;
+			image_memory_barrier[0].subresourceRange.baseMipLevel = src_tex->base_mipmap;
+			image_memory_barrier[0].subresourceRange.levelCount = 1;
+			image_memory_barrier[0].subresourceRange.baseArrayLayer = src_tex->base_layer;
+			image_memory_barrier[0].subresourceRange.layerCount = 1;
 
-			vkCmdPipelineBarrier(command_buffer, VK_ACCESS_TRANSFER_WRITE_BIT, barrier_flags, 0, 0, nullptr, 0, nullptr, 1, &image_memory_barrier);
-		}
+			// Make dst readable.
+			image_memory_barrier[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			image_memory_barrier[1].pNext = nullptr;
+			image_memory_barrier[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			image_memory_barrier[1].dstAccessMask = access_flags;
+			image_memory_barrier[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+			image_memory_barrier[1].newLayout = dst_tex->layout;
 
-		{ // Make dst readable.
+			image_memory_barrier[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			image_memory_barrier[1].image = dst_tex->image;
+			image_memory_barrier[1].subresourceRange.aspectMask = dst_tex->read_aspect_mask;
+			image_memory_barrier[1].subresourceRange.baseMipLevel = dst_tex->base_mipmap;
+			image_memory_barrier[1].subresourceRange.levelCount = 1;
+			image_memory_barrier[1].subresourceRange.baseArrayLayer = dst_tex->base_layer;
+			image_memory_barrier[1].subresourceRange.layerCount = 1;
 
-			VkImageMemoryBarrier image_memory_barrier;
-			image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			image_memory_barrier.pNext = nullptr;
-			image_memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			image_memory_barrier.dstAccessMask = access_flags;
-			image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-			image_memory_barrier.newLayout = dst_tex->layout;
-
-			image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			image_memory_barrier.image = dst_tex->image;
-			image_memory_barrier.subresourceRange.aspectMask = dst_tex->read_aspect_mask;
-			image_memory_barrier.subresourceRange.baseMipLevel = dst_tex->base_mipmap;
-			image_memory_barrier.subresourceRange.levelCount = 1;
-			image_memory_barrier.subresourceRange.baseArrayLayer = dst_tex->base_layer;
-			image_memory_barrier.subresourceRange.layerCount = 1;
-
-			vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, barrier_flags, 0, 0, nullptr, 0, nullptr, 1, &image_memory_barrier);
+			vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, barrier_flags, 0, 0, nullptr, 0, nullptr, 2, image_memory_barrier);
 		}
 	}
 
@@ -6751,6 +6758,10 @@ RenderingDevice::DrawListID RenderingDeviceVulkan::draw_list_begin_for_screen(Di
 		return INVALID_ID;
 	}
 
+	ERR_FAIL_COND_V_MSG(current_mode.has_flag(DRAW_LIST_OPEN) || current_mode.has_flag(COMPUTE_LIST_OPEN), INVALID_ID, "Lists must be ended!");
+	to_graphics_barrier();
+	current_mode.set_flag(DRAW_LIST_OPEN);
+
 	Size2i size = Size2i(context->window_get_width(p_screen), context->window_get_height(p_screen));
 
 	_draw_list_allocate(Rect2i(Vector2i(), size), 0, 0);
@@ -7019,6 +7030,10 @@ RenderingDevice::DrawListID RenderingDeviceVulkan::draw_list_begin(RID p_framebu
 	ERR_FAIL_COND_V_MSG(draw_list != nullptr, INVALID_ID, "Only one draw list can be active at the same time.");
 	ERR_FAIL_COND_V_MSG(compute_list != nullptr && !compute_list->state.allow_draw_overlap, INVALID_ID, "Only one draw/compute list can be active at the same time.");
 
+	ERR_FAIL_COND_V_MSG(current_mode.has_flag(DRAW_LIST_OPEN) || (current_mode.has_flag(COMPUTE_LIST_OPEN) && !compute_list->state.allow_draw_overlap), INVALID_ID, "Lists must be ended!");
+	to_graphics_barrier();
+	current_mode.set_flag(DRAW_LIST_OPEN);
+
 	Framebuffer *framebuffer = framebuffer_owner.get_or_null(p_framebuffer);
 	ERR_FAIL_NULL_V(framebuffer, INVALID_ID);
 
@@ -7127,6 +7142,10 @@ Error RenderingDeviceVulkan::draw_list_begin_split(RID p_framebuffer, uint32_t p
 	ERR_FAIL_COND_V_MSG(compute_list != nullptr && !compute_list->state.allow_draw_overlap, ERR_BUSY, "Only one draw/compute list can be active at the same time.");
 
 	ERR_FAIL_COND_V(p_splits < 1, ERR_INVALID_DECLARATION);
+
+	ERR_FAIL_COND_V_MSG(current_mode.has_flag(DRAW_LIST_OPEN) || (current_mode.has_flag(COMPUTE_LIST_OPEN) && !compute_list->state.allow_draw_overlap), ERR_CANT_OPEN, "Lists must be ended!");
+	to_graphics_barrier();
+	current_mode.set_flag(DRAW_LIST_OPEN);
 
 	Framebuffer *framebuffer = framebuffer_owner.get_or_null(p_framebuffer);
 	ERR_FAIL_NULL_V(framebuffer, ERR_INVALID_DECLARATION);
@@ -7880,6 +7899,10 @@ void RenderingDeviceVulkan::draw_list_end(BitField<BarrierMask> p_post_barrier) 
 		vkCmdPipelineBarrier(frames[frame].draw_command_buffer, src_stage, barrier_flags, 0, 1, &mem_barrier, 0, nullptr, image_barrier_count, image_barriers);
 	}
 
+	ERR_FAIL_COND_MSG(!current_mode.has_flag(DRAW_LIST_OPEN), "Draw List was not open!");
+	current_mode.clear_flag(DRAW_LIST_OPEN);
+	current_mode.set_flag(DRAW_LIST_NEEDS_BARRIER);
+
 #ifdef FORCE_FULL_BARRIER
 	_full_barrier(true);
 #endif
@@ -7897,6 +7920,10 @@ RenderingDevice::ComputeListID RenderingDeviceVulkan::compute_list_begin(bool p_
 
 	// Lock while compute_list is active.
 	_THREAD_SAFE_LOCK_
+
+	ERR_FAIL_COND_V_MSG(current_mode.has_flag(DRAW_LIST_OPEN) || current_mode.has_flag(COMPUTE_LIST_OPEN), INVALID_ID, "Lists must be ended!");
+	to_compute_barrier();
+	current_mode.set_flag(COMPUTE_LIST_OPEN);
 
 	const uint32_t frame = context->get_frame_index();
 
@@ -8387,6 +8414,10 @@ void RenderingDeviceVulkan::compute_list_end(BitField<BarrierMask> p_post_barrie
 	memdelete(compute_list);
 	compute_list = nullptr;
 
+	ERR_FAIL_COND_MSG(!current_mode.has_flag(COMPUTE_LIST_OPEN), "Compute List was not open!");
+	current_mode.clear_flag(COMPUTE_LIST_OPEN);
+	current_mode.set_flag(COMPUTE_LIST_NEEDS_BARRIER);
+
 	// Compute_list is no longer active.
 	_THREAD_SAFE_UNLOCK_
 }
@@ -8448,6 +8479,66 @@ void RenderingDeviceVulkan::full_barrier() {
 #endif
 	_full_barrier(true);
 }
+
+// TODO: Begin this goes away after ARG (Acyclic Render Graph).
+void RenderingDeviceVulkan::to_graphics_barrier() {
+	const bool allow_compute_overlap = compute_list && compute_list->state.allow_draw_overlap;
+
+	if (!current_mode.has_flag(DRAW_LIST_NEEDS_BARRIER) &&
+			(!current_mode.has_flag(COMPUTE_LIST_NEEDS_BARRIER) || allow_compute_overlap)) {
+		return;
+	}
+
+	VkPipelineStageFlags src_stages = 0u;
+	VkPipelineStageFlags dst_stages = 0u;
+
+	VkAccessFlags src_flags = 0u;
+	VkAccessFlags dst_flags = 0u;
+
+	if (current_mode.has_flag(DRAW_LIST_NEEDS_BARRIER)) {
+		src_stages |= VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
+		src_flags |= VK_ACCESS_SHADER_WRITE_BIT |
+				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+		dst_stages |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+				VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+				VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dst_flags |= VK_ACCESS_SHADER_READ_BIT |
+				VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+				VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		current_mode.clear_flag(DRAW_LIST_NEEDS_BARRIER);
+	}
+
+	if (current_mode.has_flag(COMPUTE_LIST_NEEDS_BARRIER) && !allow_compute_overlap) {
+		src_stages |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+		src_flags |= VK_ACCESS_SHADER_WRITE_BIT;
+
+		dst_stages |= VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
+		dst_flags |= VK_ACCESS_SHADER_READ_BIT |
+				VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+				VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		current_mode.clear_flag(COMPUTE_LIST_NEEDS_BARRIER);
+	}
+
+	DEV_ASSERT(src_stages != 0u && dst_stages != 0u && src_flags != 0u && dst_flags != 0u);
+
+	_memory_barrier(src_stages, dst_stages, src_flags, dst_flags, true);
+}
+
+void RenderingDeviceVulkan::to_compute_barrier() {
+	if (!current_mode.has_flag(DRAW_LIST_NEEDS_BARRIER)) {
+		return;
+	}
+	_memory_barrier(VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_ACCESS_SHADER_WRITE_BIT |
+					VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+			VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+			true);
+	current_mode.clear_flag(DRAW_LIST_NEEDS_BARRIER);
+}
+// TODO: End this goes away after ARG.
 
 #if 0
 void RenderingDeviceVulkan::draw_list_render_secondary_to_framebuffer(ID p_framebuffer, ID *p_draw_lists, uint32_t p_draw_list_count, InitialAction p_initial_action, FinalAction p_final_action, const Vector<Variant> &p_clear_colors) {
