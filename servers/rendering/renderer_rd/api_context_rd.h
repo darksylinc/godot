@@ -35,6 +35,12 @@
 #include "servers/rendering/rendering_device_driver.h"
 
 class ApiContextRD {
+protected:
+	uint32_t frame_index = 0;
+	// Initialize to 0 because we don't want it to be used before we initialize and read the config
+	// (this value must stay constant throghout VulkanContext's & RenderingDevice's lifetime).
+	uint32_t frame_count = 0;
+
 public:
 	virtual const char *get_api_name() const = 0;
 	virtual RenderingDevice::Capabilities get_device_capabilities() const = 0;
@@ -75,6 +81,9 @@ public:
 
 	virtual RenderingDeviceDriver *get_driver(RID p_local_device = RID()) = 0;
 	virtual bool is_debug_utils_enabled() const = 0;
+
+	uint32_t get_frame_index() const { return frame_index; }
+	uint32_t get_frame_count() const { return frame_count; }
 
 	virtual ~ApiContextRD();
 };

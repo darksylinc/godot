@@ -93,7 +93,7 @@ private:
 	enum {
 		MAX_EXTENSIONS = 128,
 		MAX_LAYERS = 64,
-		FRAME_LAG = 2
+		MAX_FRAME_LAG = 4
 	};
 
 	static VulkanHooks *vulkan_hooks;
@@ -131,10 +131,11 @@ private:
 	VkQueue present_queue = VK_NULL_HANDLE;
 	VkColorSpaceKHR color_space;
 	VkFormat format;
-	VkSemaphore draw_complete_semaphores[FRAME_LAG];
-	VkSemaphore image_ownership_semaphores[FRAME_LAG];
-	int frame_index = 0;
-	VkFence fences[FRAME_LAG];
+	VkSemaphore draw_complete_semaphores[MAX_FRAME_LAG] = {};
+	VkSemaphore image_ownership_semaphores[MAX_FRAME_LAG] = {};
+	// See swapchainImageCount.
+	uint32_t swapchain_desired_count = 0;
+	VkFence fences[MAX_FRAME_LAG];
 	VkPhysicalDeviceMemoryProperties memory_properties;
 	VkPhysicalDeviceFeatures physical_device_features;
 
@@ -150,7 +151,7 @@ private:
 		VkSwapchainKHR swapchain = VK_NULL_HANDLE;
 		SwapchainImageResources *swapchain_image_resources = VK_NULL_HANDLE;
 		VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-		VkSemaphore image_acquired_semaphores[FRAME_LAG];
+		VkSemaphore image_acquired_semaphores[MAX_FRAME_LAG] = {};
 		bool semaphore_acquired = false;
 		uint32_t current_buffer = 0;
 		int width = 0;

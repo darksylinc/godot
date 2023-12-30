@@ -190,6 +190,8 @@ Error RenderingDevice::_staging_buffer_allocate(uint32_t p_amount, uint32_t p_re
 	r_alloc_size = p_amount;
 	r_required_action = STAGING_REQUIRED_ACTION_NONE;
 
+	const uint32_t frame_count = context->get_frame_count();
+
 	while (true) {
 		r_alloc_offset = 0;
 
@@ -329,6 +331,8 @@ Error RenderingDevice::_buffer_update(Buffer *p_buffer, RID p_buffer_id, size_t 
 
 	thread_local LocalVector<RDG::RecordedBufferCopy> command_buffer_copies_vector;
 	command_buffer_copies_vector.clear();
+
+	const uint32_t frame = context->get_frame_index();
 
 	while (to_submit > 0) {
 		uint32_t block_write_offset;
@@ -1025,6 +1029,8 @@ Error RenderingDevice::_texture_update(RID p_texture, uint32_t p_layer, const Ve
 
 	thread_local LocalVector<RDG::RecordedBufferToTextureCopy> command_buffer_to_texture_copies_vector;
 	command_buffer_to_texture_copies_vector.clear();
+
+	const uint32_t frame = context->get_frame_index();
 
 	if (p_use_setup_queue && driver->api_trait_get(RDD::API_TRAIT_HONORS_PIPELINE_BARRIERS)) {
 		// When using the setup queue directly, we transition the texture to the optimal layout.
@@ -4372,6 +4378,8 @@ void RenderingDevice::_free_internal(RID p_id) {
 	}
 #endif
 
+	const uint32_t frame = context->get_frame_index();
+
 	// Push everything so it's disposed of next time this frame index is processed (means, it's safe to do it).
 	if (texture_owner.owns(p_id)) {
 		Texture *texture = texture_owner.get_or_null(p_id);
@@ -4561,6 +4569,8 @@ void RenderingDevice::_finalize_command_buffers(bool p_postpare) {
 		ERR_PRINT("Found open compute list at the end of the frame, this should never happen (further compute will likely not work).");
 	}
 
+	const uint32_t frame = context->get_frame_index();
+
 	{ // Complete the setup buffer (that needs to be processed before anything else).
 		draw_graph.end(frames[frame].draw_command_buffer, RENDER_GRAPH_REORDER, RENDER_GRAPH_FULL_BARRIERS);
 
@@ -4576,6 +4586,8 @@ void RenderingDevice::_finalize_command_buffers(bool p_postpare) {
 
 void RenderingDevice::_begin_frame() {
 	draw_graph.begin();
+
+	const uint32_t frame = context->get_frame_index();
 
 	// Erase pending resources.
 	_free_pending_resources(frame);
@@ -4630,8 +4642,6 @@ void RenderingDevice::swap_buffers() {
 		context->swap_buffers();
 	}
 
-	frame = (frame + 1) % frame_count;
-
 	_begin_frame();
 }
 
@@ -4642,6 +4652,8 @@ void RenderingDevice::submit() {
 	ERR_FAIL_COND_MSG(local_device_processing, "device already submitted, call sync to wait until done.");
 
 	_finalize_command_buffers(false);
+
+	const uint32_t frame = context->get_frame_index();
 
 	RDD::CommandBufferID command_buffers[2] = { frames[frame].setup_command_buffer, frames[frame].draw_command_buffer };
 	context->local_device_push_command_buffers(local_device, command_buffers, 2);
@@ -4659,7 +4671,7 @@ void RenderingDevice::sync() {
 	local_device_processing = false;
 }
 
-void RenderingDevice::_free_pending_resources(int p_frame) {
+void RenderingDevice::_free_pending_resources(uint32_t p_frame) {
 	// Free in dependency usage order, so nothing weird happens.
 	// Pipelines.
 	while (frames[p_frame].render_pipelines_to_dispose_of.front()) {
@@ -4743,12 +4755,13 @@ void RenderingDevice::_free_pending_resources(int p_frame) {
 
 void RenderingDevice::prepare_screen_for_drawing() {
 	_THREAD_SAFE_METHOD_
+	const uint32_t frame = context->get_frame_index();
 	context->prepare_buffers(frames[frame].draw_command_buffer);
 	screen_prepared = true;
 }
 
 uint32_t RenderingDevice::get_frame_delay() const {
-	return frame_count;
+	return context->get_frame_count();
 }
 
 uint64_t RenderingDevice::get_memory_usage(MemoryType p_type) const {
@@ -4773,6 +4786,8 @@ void RenderingDevice::_flush(bool p_current_frame) {
 	if (local_device.is_valid() && !p_current_frame) {
 		return; // Flushing previous frames has no effect with local device.
 	}
+
+	const uint32_t frame = context->get_frame_index();
 
 	// Not doing this crashes RADV (undefined behavior).
 	if (p_current_frame) {
@@ -4817,18 +4832,15 @@ void RenderingDevice::initialize(ApiContextRD *p_context, bool p_local_device) {
 	device_capabilities = p_context->get_device_capabilities();
 
 	if (p_local_device) {
-		frame_count = 1;
 		local_device = context->local_device_create();
-	} else {
-		frame_count = context->get_swapchain_image_count() + 1; // Always need one extra to ensure it's unused at any time, without having to use a fence for this.
 	}
 	driver = context->get_driver(local_device);
 	max_timestamp_query_elements = 256;
 
+	const uint32_t frame_count = context->get_frame_count();
 	frames.resize(frame_count);
-	frame = 0;
 	// Create setup and frame buffers.
-	for (int i = 0; i < frame_count; i++) {
+	for (uint32_t i = 0; i < frame_count; i++) {
 		frames[i].index = 0;
 
 		// Create command pool, one per frame is recommended.
@@ -4868,7 +4880,7 @@ void RenderingDevice::initialize(ApiContextRD *p_context, bool p_local_device) {
 		}
 	}
 
-	for (int i = 0; i < frame_count; i++) {
+	for (uint32_t i = 0; i < frame_count; i++) {
 		// Reset all queries in a query pool before doing any operations with them.
 		driver->command_timestamp_query_pool_reset(frames[0].setup_command_buffer, frames[i].timestamp_pool, max_timestamp_query_elements);
 	}
@@ -4893,7 +4905,7 @@ void RenderingDevice::initialize(ApiContextRD *p_context, bool p_local_device) {
 	staging_buffer_current = 0;
 	staging_buffer_used = false;
 
-	for (int i = 0; i < frame_count; i++) {
+	for (uint32_t i = 0; i < frame_count; i++) {
 		// Staging was never used, create a block.
 		Error err = _insert_staging_block();
 		ERR_CONTINUE(err != OK);
@@ -5017,6 +5029,7 @@ void RenderingDevice::_free_rids(T &p_owner, const char *p_type) {
 void RenderingDevice::capture_timestamp(const String &p_name) {
 	ERR_FAIL_COND_MSG(draw_list != nullptr, "Capturing timestamps during draw list creation is not allowed. Offending timestamp was: " + p_name);
 	ERR_FAIL_COND_MSG(compute_list != nullptr, "Capturing timestamps during compute list creation is not allowed. Offending timestamp was: " + p_name);
+	const uint32_t frame = context->get_frame_index();
 	ERR_FAIL_COND(frames[frame].timestamp_count >= max_timestamp_query_elements);
 
 	draw_graph.add_capture_timestamp(frames[frame].timestamp_pool, frames[frame].timestamp_count);
@@ -5095,24 +5108,29 @@ uint64_t RenderingDevice::get_driver_resource(DriverResource p_resource, RID p_r
 }
 
 uint32_t RenderingDevice::get_captured_timestamps_count() const {
+	const uint32_t frame = context->get_frame_index();
 	return frames[frame].timestamp_result_count;
 }
 
 uint64_t RenderingDevice::get_captured_timestamps_frame() const {
+	const uint32_t frame = context->get_frame_index();
 	return frames[frame].index;
 }
 
 uint64_t RenderingDevice::get_captured_timestamp_gpu_time(uint32_t p_index) const {
+	const uint32_t frame = context->get_frame_index();
 	ERR_FAIL_UNSIGNED_INDEX_V(p_index, frames[frame].timestamp_result_count, 0);
 	return driver->timestamp_query_result_to_time(frames[frame].timestamp_result_values[p_index]);
 }
 
 uint64_t RenderingDevice::get_captured_timestamp_cpu_time(uint32_t p_index) const {
+	const uint32_t frame = context->get_frame_index();
 	ERR_FAIL_UNSIGNED_INDEX_V(p_index, frames[frame].timestamp_result_count, 0);
 	return frames[frame].timestamp_cpu_result_values[p_index];
 }
 
 String RenderingDevice::get_captured_timestamp_name(uint32_t p_index) const {
+	const uint32_t frame = context->get_frame_index();
 	ERR_FAIL_UNSIGNED_INDEX_V(p_index, frames[frame].timestamp_result_count, String());
 	return frames[frame].timestamp_result_names[p_index];
 }
@@ -5175,9 +5193,14 @@ void RenderingDevice::finalize() {
 		}
 	}
 
+	const uint32_t frame = context->get_frame_index();
+	const uint32_t frame_count = context->get_frame_count();
+
+	DEV_ASSERT(frame_count == frames.size());
+
 	// Free everything pending.
-	for (uint32_t i = 0; i < frames.size(); i++) {
-		int f = (frame + i) % frames.size();
+	for (uint32_t i = 0; i < frame_count; i++) {
+		const uint32_t f = (frame + i) % frame_count;
 		_free_pending_resources(f);
 		driver->command_pool_free(frames[i].command_pool);
 		driver->timestamp_query_pool_free(frames[i].timestamp_pool);
