@@ -62,6 +62,11 @@ public:
 	static void *realloc_static(void *p_memory, size_t p_bytes, bool p_pad_align = false);
 	static void free_static(void *p_ptr, bool p_pad_align = false);
 
+	static void *alloc_aligned_static(size_t p_bytes, size_t p_alignment);
+	static void *realloc_aligned_static(void *p_memory, size_t p_bytes, size_t p_prev_bytes, size_t p_alignment);
+	static void free_aligned_static(void* p_memory);
+
+
 	static uint64_t get_mem_available();
 	static uint64_t get_mem_usage();
 	static uint64_t get_mem_max_usage();

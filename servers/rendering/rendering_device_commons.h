@@ -43,6 +43,9 @@ class RenderingDeviceCommons : public Object {
 	// with RenderingDeviceDriver.
 	////////////////////////////////////////////
 public:
+	static const bool command_pool_reset_enabled = true;
+	static const bool render_pass_opts_enabled = true;
+
 	/*****************/
 	/**** GENERIC ****/
 	/*****************/
@@ -271,6 +274,28 @@ public:
 		DATA_FORMAT_MAX,
 	};
 
+	enum BreadcrumbMarker {
+		NONE = 0,
+		// Environment
+		REFLECTION_PROBES,
+		SKY_PASS,
+		// Light mapping
+		LIGHTMAPPER_PASS,
+		// Shadows
+		SHADOW_PASS_DIRECTIONAL,
+		SHADOW_PASS_CUBE,
+		// Geometry passes
+		OPAQUE_PASS,
+		ALPHA_PASS,
+		TRANSPARENT_PASS,
+		// Screen effects
+		POST_PROCESSING_PASS,
+		BLIT_PASS,
+		UI_PASS,
+		// Other
+		DEBUG_PASS
+	};
+
 	enum CompareOperator {
 		COMPARE_OP_NEVER,
 		COMPARE_OP_LESS,
@@ -321,6 +346,10 @@ public:
 		TEXTURE_USAGE_CAN_COPY_TO_BIT = (1 << 8),
 		TEXTURE_USAGE_INPUT_ATTACHMENT_BIT = (1 << 9),
 		TEXTURE_USAGE_VRS_ATTACHMENT_BIT = (1 << 10),
+		//<TF>
+		//@ShadyTF : lazily allocated buffers
+		TEXTURE_USAGE_LAZILY_ALLOCATED_BIT = (1 << 11),
+		//</TF>
 	};
 
 	struct TextureFormat {
@@ -496,6 +525,11 @@ public:
 		UNIFORM_TYPE_UNIFORM_BUFFER, // Regular uniform buffer (or UBO).
 		UNIFORM_TYPE_STORAGE_BUFFER, // Storage buffer ("buffer" qualifier) like UBO, but supports storage, for compute mostly.
 		UNIFORM_TYPE_INPUT_ATTACHMENT, // Used for sub-pass read/write, for mobile mostly.
+// <TF>
+// @ShadyTF 
+// Dynamic uniform buffer
+		UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC, // Dynamic uniform buffer (or Dynamic UBO).
+// </TF>
 		UNIFORM_TYPE_MAX
 	};
 

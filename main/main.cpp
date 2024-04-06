@@ -196,7 +196,7 @@ static bool single_threaded_scene = false;
 // Display
 
 static DisplayServer::WindowMode window_mode = DisplayServer::WINDOW_MODE_WINDOWED;
-static DisplayServer::ScreenOrientation window_orientation = DisplayServer::SCREEN_LANDSCAPE;
+static DisplayServer::ScreenOrientation window_orientation = DisplayServer::SCREEN_SENSOR;
 static DisplayServer::VSyncMode window_vsync_mode = DisplayServer::VSYNC_ENABLED;
 static uint32_t window_flags = 0;
 static Size2i window_size = Size2i(1152, 648);
@@ -878,6 +878,7 @@ int Main::test_entrypoint(int argc, char *argv[], bool &tests_need_run) {
  */
 
 Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_phase) {
+
 	Thread::make_main_thread();
 	set_current_thread_safe_for_nodes(true);
 
@@ -2309,7 +2310,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	}
 
 	{
-		window_orientation = DisplayServer::ScreenOrientation(int(GLOBAL_DEF_BASIC("display/window/handheld/orientation", DisplayServer::ScreenOrientation::SCREEN_LANDSCAPE)));
+		window_orientation = DisplayServer::ScreenOrientation(int(GLOBAL_DEF_BASIC("display/window/handheld/orientation", DisplayServer::ScreenOrientation::SCREEN_SENSOR)));
 	}
 	{
 		window_vsync_mode = DisplayServer::VSyncMode(int(GLOBAL_DEF_BASIC("display/window/vsync/vsync_mode", DisplayServer::VSyncMode::VSYNC_ENABLED)));
@@ -4270,3 +4271,53 @@ void Main::cleanup(bool p_force) {
 
 	OS::get_singleton()->finalize_core();
 }
+
+// <TF>
+// @ShadyTF : Thermal status support
+
+Main::ThermalState Main::thermal_state = Main::THERMAL_STATE_NONE;
+
+const char* Main::get_therrmal_state_string(Main::ThermalState p_thermalState) {
+	switch (p_thermalState)	{
+		case THERMAL_STATE_NOT_SUPPORTED: return "NotSupported";
+		case THERMAL_STATE_ERROR:         return "Error";
+		case THERMAL_STATE_NONE:          return "None";
+		case THERMAL_STATE_LIGHT:         return "Light";
+		case THERMAL_STATE_MODERATE:      return "Moderate";
+		case THERMAL_STATE_SEVERE:        return "Severe";
+		case THERMAL_STATE_CRITICAL:      return "Critical";
+		case THERMAL_STATE_EMERGENCY:     return "Emergency";
+		case THERMAL_STATE_SHUTDOWN:      return "Shutdown";
+		default: return "Invalid";
+	}
+}
+
+void Main::update_thermal_state(ThermalState p_thermalState) {
+	DEV_ASSERT(p_thermalState >= THERMAL_STATE_MIN && p_thermalState < THERMAL_STATE_MAX);
+    const char* state_string = get_therrmal_state_string(p_thermalState);
+    OS::get_singleton()->print("Thermal state changed : %s (%d)", state_string, p_thermalState);
+
+    if ( p_thermalState > THERMAL_STATE_MODERATE ){
+        const String error_msg = "Thermal state is " + String(state_string);
+        OS::get_singleton()->alert(error_msg );
+    }
+	thermal_state = p_thermalState;
+}
+
+Main::ThermalState Main::get_thermal_state() {
+	return thermal_state;
+}
+
+float Main::get_thermal_headroom( int p_forecast_seconds ) {
+
+#if defined(ANDROID_ENABLED)
+	float GodotGetThermalHeadroom(int);
+	return GodotGetThermalHeadroom( p_forecast_seconds );
+#else
+	return -1.0f;
+#endif 
+
+}
+
+
+// </TF>

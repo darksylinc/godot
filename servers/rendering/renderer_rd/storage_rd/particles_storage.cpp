@@ -1083,6 +1083,7 @@ void ParticlesStorage::_particles_process(Particles *p_particles, double p_delta
 				}
 				uniforms.push_back(u);
 			}
+
 			p_particles->collision_textures_uniform_set = RD::get_singleton()->uniform_set_create(uniforms, particles_shader.default_shader_rd, 2);
 			p_particles->collision_heightmap_texture = collision_heightmap_texture;
 		}
@@ -1469,7 +1470,13 @@ void ParticlesStorage::update_particles() {
 				if (particles->frame_params_buffer.is_valid()) {
 					RD::get_singleton()->free(particles->frame_params_buffer);
 				}
-				particles->frame_params_buffer = RD::get_singleton()->storage_buffer_create(sizeof(ParticlesFrameParams) * trail_steps);
+				
+				// <TF>
+				// @ShadyTF : persistent buffers
+				// was:
+				//particles->frame_params_buffer = RD::get_singleton()->storage_buffer_create(sizeof(ParticlesFrameParams) * trail_steps);
+				particles->frame_params_buffer = RD::get_singleton()->storage_buffer_create(sizeof(ParticlesFrameParams) * trail_steps, Vector<uint8_t>(), 0, RD::BUFFER_CREATION_PERSISTENT_BIT);
+				// </TF>
 			}
 
 			if (particles->trail_bind_poses.size() > 1 && particles->trail_bind_pose_buffer.is_null()) {
@@ -1625,7 +1632,7 @@ void ParticlesStorage::update_particles() {
 			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, particles->trail_bind_pose_uniform_set, 2);
 			RD::get_singleton()->compute_list_set_push_constant(compute_list, &copy_push_constant, sizeof(ParticlesShader::CopyPushConstant));
 
-			RD::get_singleton()->compute_list_dispatch_threads(compute_list, total_amount, 1, 1);
+			RD::get_singleton()->compute_list_dispatch_threads(compute_list, (uint32_t)ceil((float)total_amount / 64.0), 1, 1);
 
 			RD::get_singleton()->compute_list_end();
 		}

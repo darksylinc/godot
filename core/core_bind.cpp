@@ -42,6 +42,17 @@
 #include "core/os/thread_safe.h"
 #include "core/variant/typed_array.h"
 
+
+#if defined(VK_TRACK_DRIVER_MEMORY) || defined(VK_TRACK_DEVICE_MEMORY)
+#include "drivers/vulkan/rendering_context_driver_vulkan.h"
+#endif
+
+// <TF>
+// @ShadyTF script function to get performance report text
+#include "servers/rendering/rendering_device.h"
+// </TF>
+
+
 namespace core_bind {
 
 ////// ResourceLoader //////
@@ -1635,6 +1646,12 @@ int Engine::get_max_fps() const {
 double Engine::get_frames_per_second() const {
 	return ::Engine::get_singleton()->get_frames_per_second();
 }
+// <TF>
+// @ShadyTF script function to get performance report text
+String Engine::get_perf_report() const {
+	return RenderingDevice::get_singleton()->get_perf_report();
+}
+// </TF>
 
 uint64_t Engine::get_physics_frames() const {
 	return ::Engine::get_singleton()->get_physics_frames();
@@ -1643,6 +1660,45 @@ uint64_t Engine::get_physics_frames() const {
 uint64_t Engine::get_process_frames() const {
 	return ::Engine::get_singleton()->get_process_frames();
 }
+
+#if defined(VK_TRACK_DRIVER_MEMORY) || defined(VK_TRACK_DEVICE_MEMORY)
+String Engine::get_tracked_object_name(uint32_t typeIndex) const {
+	return RenderingContextDriverVulkan::get_tracked_object_name(typeIndex);
+}
+uint64_t Engine::get_tracked_object_type_count() const {
+	return RenderingContextDriverVulkan::get_tracked_object_type_count();
+}
+#endif
+
+#if defined(VK_TRACK_DRIVER_MEMORY)
+uint64_t Engine::get_driver_total_memory() const {
+	return RenderingContextDriverVulkan::get_driver_total_memory();
+}
+uint64_t Engine::get_driver_allocation_count() const {
+	return RenderingContextDriverVulkan::get_driver_allocation_count();
+}
+uint64_t Engine::get_driver_memory_by_object_type(uint32_t type) const {
+	return RenderingContextDriverVulkan::get_driver_memory_by_object_type(type);
+}
+uint64_t Engine::get_driver_allocs_by_object_type(uint32_t type) const {
+	return RenderingContextDriverVulkan::get_driver_allocs_by_object_type(type);
+}
+#endif
+
+#if defined(VK_TRACK_DEVICE_MEMORY)
+uint64_t Engine::get_device_total_memory() const {
+	return RenderingContextDriverVulkan::get_device_total_memory();
+}
+uint64_t Engine::get_device_allocation_count() const {
+	return RenderingContextDriverVulkan::get_device_allocation_count();
+}
+uint64_t Engine::get_device_memory_by_object_type(uint32_t type) const {
+	return RenderingContextDriverVulkan::get_device_memory_by_object_type(type);
+}
+uint64_t Engine::get_device_allocs_by_object_type(uint32_t type) const {
+	return RenderingContextDriverVulkan::get_device_allocs_by_object_type(type);
+}
+#endif
 
 void Engine::set_time_scale(double p_scale) {
 	::Engine::get_singleton()->set_time_scale(p_scale);
@@ -1791,9 +1847,33 @@ void Engine::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_time_scale"), &Engine::get_time_scale);
 
 	ClassDB::bind_method(D_METHOD("get_frames_drawn"), &Engine::get_frames_drawn);
+	// <TF>
+	// @ShadyTF script function to get performance report text
 	ClassDB::bind_method(D_METHOD("get_frames_per_second"), &Engine::get_frames_per_second);
+	// </TF>
+
+	ClassDB::bind_method(D_METHOD("get_perf_report"), &Engine::get_perf_report);
 	ClassDB::bind_method(D_METHOD("get_physics_frames"), &Engine::get_physics_frames);
 	ClassDB::bind_method(D_METHOD("get_process_frames"), &Engine::get_process_frames);
+
+#if defined(VK_TRACK_DRIVER_MEMORY) || defined(VK_TRACK_DEVICE_MEMORY)
+	ClassDB::bind_method(D_METHOD("get_tracked_object_name"), &Engine::get_tracked_object_name);
+	ClassDB::bind_method(D_METHOD("get_tracked_object_type_count"), &Engine::get_tracked_object_type_count);
+#endif
+
+#if defined(VK_TRACK_DRIVER_MEMORY)
+	ClassDB::bind_method(D_METHOD("get_driver_total_memory"), &Engine::get_driver_total_memory);
+	ClassDB::bind_method(D_METHOD("get_driver_allocation_count"), &Engine::get_driver_allocation_count);
+	ClassDB::bind_method(D_METHOD("get_driver_memory_by_object_type"), &Engine::get_driver_memory_by_object_type);
+	ClassDB::bind_method(D_METHOD("get_driver_allocs_by_object_type"), &Engine::get_driver_allocs_by_object_type);
+#endif
+
+#if defined(VK_TRACK_DEVICE_MEMORY)
+	ClassDB::bind_method(D_METHOD("get_device_total_memory"), &Engine::get_device_total_memory);
+	ClassDB::bind_method(D_METHOD("get_device_allocation_count"), &Engine::get_device_allocation_count);
+	ClassDB::bind_method(D_METHOD("get_device_memory_by_object_type"), &Engine::get_device_memory_by_object_type);
+	ClassDB::bind_method(D_METHOD("get_device_allocs_by_object_type"), &Engine::get_device_allocs_by_object_type);
+#endif
 
 	ClassDB::bind_method(D_METHOD("get_main_loop"), &Engine::get_main_loop);
 

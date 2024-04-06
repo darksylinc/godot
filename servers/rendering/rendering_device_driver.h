@@ -192,6 +192,10 @@ public:
 		BUFFER_USAGE_INDEX_BIT = (1 << 6),
 		BUFFER_USAGE_VERTEX_BIT = (1 << 7),
 		BUFFER_USAGE_INDIRECT_BIT = (1 << 8),
+		// <TF>
+		// @ShadyTF : bit for persistenly mapped buffers
+		BUFFER_USAGE_PERSISTENT_BIT = (1 << 9)
+		// </TF>
 	};
 
 	enum {
@@ -205,6 +209,11 @@ public:
 	virtual uint64_t buffer_get_allocation_size(BufferID p_buffer) = 0;
 	virtual uint8_t *buffer_map(BufferID p_buffer) = 0;
 	virtual void buffer_unmap(BufferID p_buffer) = 0;
+	// <TF>
+	// @ShadyTF
+	// adding UMA feature, when possible a valid persistent address is returned and can be used directly
+	virtual uint8_t* buffer_get_persistent_address(BufferID p_buffer) = 0;
+	// </TF>
 
 	/*****************/
 	/**** TEXTURE ****/
@@ -411,7 +420,7 @@ public:
 	virtual Error command_queue_execute_and_present(CommandQueueID p_cmd_queue, VectorView<SemaphoreID> p_wait_semaphores, VectorView<CommandBufferID> p_cmd_buffers, VectorView<SemaphoreID> p_cmd_semaphores, FenceID p_cmd_fence, VectorView<SwapChainID> p_swap_chains) = 0;
 	virtual void command_queue_free(CommandQueueID p_cmd_queue) = 0;
 
-	// ----- POOL -----
+	// ----- BUFFER -----
 
 	enum CommandBufferType {
 		COMMAND_BUFFER_TYPE_PRIMARY,
@@ -419,6 +428,7 @@ public:
 	};
 
 	virtual CommandPoolID command_pool_create(CommandQueueFamilyID p_cmd_queue_family, CommandBufferType p_cmd_buffer_type) = 0;
+	virtual bool command_pool_reset(CommandPoolID p_cmd_pool) = 0;
 	virtual void command_pool_free(CommandPoolID p_cmd_pool) = 0;
 
 	// ----- BUFFER -----
@@ -464,10 +474,26 @@ public:
 
 	virtual String shader_get_binary_cache_key() = 0;
 	virtual Vector<uint8_t> shader_compile_binary_from_spirv(VectorView<ShaderStageSPIRVData> p_spirv, const String &p_shader_name) = 0;
-	virtual ShaderID shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name) = 0;
+	// <TF>
+	// @ShadyTF
+	// adding support of immutable samplers, which can be embedded when creating the pipeline layout on the condition they remain
+	// valid and unchanged, so they don't need to be specified when creating uniform sets
+	// Was:
+	//virtual ShaderID shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name) = 0;
+	struct ImmutableSampler {
+		UniformType type = UNIFORM_TYPE_MAX;
+		uint32_t binding = 0xffffffff; // Binding index as specified in shader.
+		LocalVector<ID> ids;
+	};
+	virtual ShaderID shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name, const Vector<ImmutableSampler>& r_immutableSamplers) = 0;
+	// </TF>
 	// Only meaningful if API_TRAIT_SHADER_CHANGE_INVALIDATION is SHADER_CHANGE_INVALIDATION_ALL_OR_NONE_ACCORDING_TO_LAYOUT_HASH.
 	virtual uint32_t shader_get_layout_hash(ShaderID p_shader) { return 0; }
 	virtual void shader_free(ShaderID p_shader) = 0;
+	// <TF>
+	// @ShadyTF unload shader modules
+	virtual void shader_destroy_modules(ShaderID p_shader) = 0;
+	// </TF>
 
 protected:
 	// An optional service to implementations.
@@ -482,9 +508,22 @@ public:
 		UniformType type = UNIFORM_TYPE_MAX;
 		uint32_t binding = 0xffffffff; // Binding index as specified in shader.
 		LocalVector<ID> ids;
+		// <TF>
+		// @ShadyTF
+		// flag to indicate  that this is an immutable sampler so it is skipped when creating uniform sets, as it would be set previously
+		// when creating the pipeline layout
+		bool immutable_sampler = false;
+		// </TF>
 	};
 
-	virtual UniformSetID uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index) = 0;
+// <TF>
+// @ShadyTF :
+// descriptor optimizations : allow the option to have linearly allocated uniform set pools for frame allocated uniform sets
+// Was:
+//  virtual UniformSetID uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index) = 0;	
+	virtual UniformSetID uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index, int p_linear_pool_index) = 0;
+	virtual void linear_uniform_set_pools_reset(int p_linear_pool_index) = 0;
+// </TF>
 	virtual void uniform_set_free(UniformSetID p_uniform_set) = 0;
 
 	// ----- COMMANDS -----
@@ -627,6 +666,12 @@ public:
 	// Binding.
 	virtual void command_bind_render_pipeline(CommandBufferID p_cmd_buffer, PipelineID p_pipeline) = 0;
 	virtual void command_bind_render_uniform_set(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index) = 0;
+	virtual void command_bind_render_uniform_sets(CommandBufferID p_cmd_buffer, VectorView<UniformSetID> p_uniform_sets, ShaderID p_shader, uint32_t p_first_set_index, uint32_t p_set_count) = 0;
+// <TF>
+// @ShadyTF 
+// Dynamic uniform buffer 
+	virtual void command_bind_render_uniform_set_dynamic(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index, uint32_t p_offsets_count, const uint32_t* p_offsets) = 0;
+// </TF>
 
 	// Drawing.
 	virtual void command_render_draw(CommandBufferID p_cmd_buffer, uint32_t p_vertex_count, uint32_t p_instance_count, uint32_t p_base_vertex, uint32_t p_first_instance) = 0;
@@ -669,6 +714,7 @@ public:
 	// Binding.
 	virtual void command_bind_compute_pipeline(CommandBufferID p_cmd_buffer, PipelineID p_pipeline) = 0;
 	virtual void command_bind_compute_uniform_set(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index) = 0;
+	virtual void command_bind_compute_uniform_sets(CommandBufferID p_cmd_buffer, VectorView<UniformSetID> p_uniform_sets, ShaderID p_shader, uint32_t p_first_set_index, uint32_t p_set_count) = 0;
 
 	// Dispatching.
 	virtual void command_compute_dispatch(CommandBufferID p_cmd_buffer, uint32_t p_x_groups, uint32_t p_y_groups, uint32_t p_z_groups) = 0;
@@ -700,6 +746,11 @@ public:
 
 	virtual void command_begin_label(CommandBufferID p_cmd_buffer, const char *p_label_name, const Color &p_color) = 0;
 	virtual void command_end_label(CommandBufferID p_cmd_buffer) = 0;
+
+	/****************/
+	/**** DEBUG *****/
+	/****************/
+	virtual void command_insert_breadcrumb(CommandBufferID p_cmd_buffer, uint32_t p_data) = 0;
 
 	/********************/
 	/**** SUBMISSION ****/
@@ -760,6 +811,10 @@ public:
 	virtual void set_object_name(ObjectType p_type, ID p_driver_id, const String &p_name) = 0;
 	virtual uint64_t get_resource_native_handle(DriverResource p_type, ID p_driver_id) = 0;
 	virtual uint64_t get_total_memory_used() = 0;
+	// <TF>
+	// @ShadyTF lazily allocated memory
+	virtual uint64_t get_lazily_memory_used() = 0;
+	// </TF>
 	virtual uint64_t limit_get(Limit p_limit) = 0;
 	virtual uint64_t api_trait_get(ApiTrait p_trait);
 	virtual bool has_feature(Features p_feature) = 0;

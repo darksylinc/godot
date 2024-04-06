@@ -31,12 +31,15 @@
 #include "register_types.h"
 
 #include "core/config/engine.h"
+#include "core/config/project_settings.h"
 #include "servers/rendering/rendering_device.h"
 
 #include <glslang/Include/Types.h>
 #include <glslang/Public/ResourceLimits.h>
 #include <glslang/Public/ShaderLang.h>
 #include <glslang/SPIRV/GlslangToSpv.h>
+#include <spirv-tools/optimizer.hpp>
+#include <glslang/External/spirv-tools/source/spirv_optimizer_options.h>
 
 static Vector<uint8_t> _compile_shader_glsl(RenderingDevice::ShaderStage p_stage, const String &p_source_code, RenderingDevice::ShaderLanguage p_language, String *r_error, const RenderingDevice *p_render_device) {
 	const RDD::Capabilities &capabilities = p_render_device->get_device_capabilities();
@@ -166,12 +169,17 @@ static Vector<uint8_t> _compile_shader_glsl(RenderingDevice::ShaderStage p_stage
 
 	std::vector<uint32_t> SpirV;
 	spv::SpvBuildLogger logger;
-	glslang::SpvOptions spvOptions;
+	glslang::SpvOptions spvOptions;	
 
+#if defined(DEBUG_ENABLED) || defined(DEV_ENABLED)
 	if (Engine::get_singleton()->is_generate_spirv_debug_info_enabled()) {
 		spvOptions.generateDebugInfo = true;
 		spvOptions.emitNonSemanticShaderDebugInfo = true;
 		spvOptions.emitNonSemanticShaderDebugSource = true;
+	}
+#endif
+	if (GLOBAL_GET("rendering/shader_compiler/shader_compilation/optimize")) {
+		spvOptions.disableOptimizer = false;
 	}
 
 	glslang::GlslangToSpv(*program.getIntermediate(stages[p_stage]), SpirV, &logger, &spvOptions);
@@ -180,6 +188,7 @@ static Vector<uint8_t> _compile_shader_glsl(RenderingDevice::ShaderStage p_stage
 	{
 		uint8_t *w = ret.ptrw();
 		memcpy(w, &SpirV[0], SpirV.size() * sizeof(uint32_t));
+		char buffer[256];
 	}
 
 	return ret;

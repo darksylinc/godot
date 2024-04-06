@@ -110,7 +110,18 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 		PFN_vkAcquireNextImageKHR AcquireNextImageKHR = nullptr;
 		PFN_vkQueuePresentKHR QueuePresentKHR = nullptr;
 		PFN_vkCreateRenderPass2KHR CreateRenderPass2KHR = nullptr;
+		// <TF>
+		// @ShadyTF debug marker extensions
+		PFN_vkCmdDebugMarkerBeginEXT vkCmdDebugMarkerBeginEXT = nullptr;
+		PFN_vkCmdDebugMarkerEndEXT vkCmdDebugMarkerEndEXT = nullptr;
+		PFN_vkCmdDebugMarkerInsertEXT vkCmdDebugMarkerInsertEXT = nullptr;
+		PFN_vkDebugMarkerSetObjectNameEXT vkDebugMarkerSetObjectNameEXT = nullptr;
+		// </TF>
 	};
+	// <TF>
+	// @ShadyTF debug marker extensions
+	VkDebugReportObjectTypeEXT _convert_to_debug_report_objectType(VkObjectType p_object_type);
+	// </TF>
 
 	VkDevice vk_device = VK_NULL_HANDLE;
 	RenderingContextDriverVulkan *context_driver = nullptr;
@@ -131,6 +142,14 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 	ShaderCapabilities shader_capabilities;
 	StorageBufferCapabilities storage_buffer_capabilities;
 	bool pipeline_cache_control_support = false;
+	bool device_fault_support = false;
+	bool device_memory_report_support = false;
+#if defined(ANDROID_ENABLED)
+	// Swappy frame pacer for Android
+	bool swappy_frame_pacer_enable = false;
+	bool swappy_enable_auto_swap = true;
+	uint32_t swappy_target_framerate = 60;
+#endif
 	DeviceFunctions device_functions;
 
 	void _register_requested_device_extension(const CharString &p_extension_name, bool p_required);
@@ -154,15 +173,18 @@ private:
 	/**** MEMORY ****/
 	/****************/
 
-	VmaAllocator allocator = nullptr;
+	VmaAllocator allocator;
 	HashMap<uint32_t, VmaPool> small_allocs_pools;
 
 	VmaPool _find_or_create_small_allocs_pool(uint32_t p_mem_type_index);
 
+private:
+	BufferID breadcrumb_buffer;
+
+public:
 	/*****************/
 	/**** BUFFERS ****/
 	/*****************/
-private:
 	struct BufferInfo {
 		VkBuffer vk_buffer = VK_NULL_HANDLE;
 		struct {
@@ -170,22 +192,29 @@ private:
 			uint64_t size = UINT64_MAX;
 		} allocation;
 		uint64_t size = 0;
+		// <TF>
+		// persistent mapped address
+		uint8_t* mapped_address = VK_NULL_HANDLE;
+		// </TF>
 		VkBufferView vk_view = VK_NULL_HANDLE; // For texel buffers.
 	};
 
-public:
 	virtual BufferID buffer_create(uint64_t p_size, BitField<BufferUsageBits> p_usage, MemoryAllocationType p_allocation_type) override final;
 	virtual bool buffer_set_texel_format(BufferID p_buffer, DataFormat p_format) override final;
 	virtual void buffer_free(BufferID p_buffer) override final;
 	virtual uint64_t buffer_get_allocation_size(BufferID p_buffer) override final;
 	virtual uint8_t *buffer_map(BufferID p_buffer) override final;
 	virtual void buffer_unmap(BufferID p_buffer) override final;
-
+	// <TF>
+	// @ShadyTF -- getter for persitent mapped address
+	virtual uint8_t* buffer_get_persistent_address(BufferID p_buffer) override final;
+	// </TF>
 	/*****************/
 	/**** TEXTURE ****/
 	/*****************/
 
 	struct TextureInfo {
+		VkImage vk_image = VK_NULL_HANDLE;
 		VkImageView vk_view = VK_NULL_HANDLE;
 		DataFormat rd_format = DATA_FORMAT_MAX;
 		VkImageCreateInfo vk_create_info = {};
@@ -304,6 +333,7 @@ private:
 
 public:
 	virtual CommandPoolID command_pool_create(CommandQueueFamilyID p_cmd_queue_family, CommandBufferType p_cmd_buffer_type) override final;
+	virtual bool command_pool_reset(CommandPoolID p_cmd_pool) override final;
 	virtual void command_pool_free(CommandPoolID p_cmd_pool) override final;
 
 	// ----- BUFFER -----
@@ -334,6 +364,7 @@ private:
 	};
 
 	void _swap_chain_release(SwapChain *p_swap_chain);
+	VkExtent2D native_display_size;
 
 public:
 	virtual SwapChainID swap_chain_create(RenderingContextDriver::SurfaceID p_surface) override final;
@@ -400,9 +431,20 @@ private:
 public:
 	virtual String shader_get_binary_cache_key() override final;
 	virtual Vector<uint8_t> shader_compile_binary_from_spirv(VectorView<ShaderStageSPIRVData> p_spirv, const String &p_shader_name) override final;
-	virtual ShaderID shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name) override final;
+	// <TF>
+	// @ShadyTF
+	// adding support of immutable samplers, which can be embedded when creating the pipeline layout on the condition they remain
+	// valid and unchanged, so they don't need to be specified when creating uniform sets
+	// Was:
+	//virtual ShaderID shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name) override final;
+	virtual ShaderID shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name, const Vector<ImmutableSampler>& r_immutableSamplers) override final;
+	// </TF>
 	virtual void shader_free(ShaderID p_shader) override final;
 
+	// <TF>
+	// @ShadyTF unload shader modules
+	virtual void shader_destroy_modules(ShaderID p_shader) override final;
+	// </TF>
 	/*********************/
 	/**** UNIFORM SET ****/
 	/*********************/
@@ -437,17 +479,46 @@ private:
 	DescriptorSetPools descriptor_set_pools;
 	uint32_t max_descriptor_sets_per_pool = 0;
 
-	VkDescriptorPool _descriptor_set_pool_find_or_create(const DescriptorSetPoolKey &p_key, DescriptorSetPools::Iterator *r_pool_sets_it);
-	void _descriptor_set_pool_unreference(DescriptorSetPools::Iterator p_pool_sets_it, VkDescriptorPool p_vk_descriptor_pool);
+	// <TF>
+	// @ShadyTF :
+	// descriptor optimizations : linear allocation of descriptor set pools
+	// Was :
+	// VkDescriptorPool _descriptor_set_pool_find_or_create(const DescriptorSetPoolKey &p_key, DescriptorSetPools::Iterator *r_pool_sets_it);
+	// void _descriptor_set_pool_unreference(DescriptorSetPools::Iterator p_pool_sets_it, VkDescriptorPool p_vk_descriptor_pool);
+	HashMap<int,DescriptorSetPools> linear_descriptor_set_pools;
+	bool linear_descriptor_pools_enabled = true;
+	VkDescriptorPool _descriptor_set_pool_find_or_create(const DescriptorSetPoolKey &p_key, DescriptorSetPools::Iterator *r_pool_sets_it, int p_linear_pool_index);
+	void _descriptor_set_pool_unreference(DescriptorSetPools::Iterator p_pool_sets_it, VkDescriptorPool p_vk_descriptor_pool, int p_linear_pool_index);
+	// </TF>
+
+	// <TF>
+	// @ShadyTF :
+	// global  flag to toggle usage of immutable sampler when creating  pipeline layouts and for skipping when creating uniform sets
+	bool immutable_samplers_enabled = true;
+	// </TF>
+	
+	
 
 	struct UniformSetInfo {
 		VkDescriptorSet vk_descriptor_set = VK_NULL_HANDLE;
 		VkDescriptorPool vk_descriptor_pool = VK_NULL_HANDLE;
+		// <TF>
+		// @ShadyTF :
+		// descriptor optimizations : linear allocation of descriptor set pools
+		VkDescriptorPool vk_linear_descriptor_pool = VK_NULL_HANDLE;
+		// </TF>
 		DescriptorSetPools::Iterator pool_sets_it = {};
 	};
 
 public:
-	virtual UniformSetID uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index) override final;
+	// <TF>
+	// @ShadyTF :
+	// descriptor optimizations : linear allocation of descriptor set pools
+	// Was:
+	// virtual UniformSetID uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index) override final;
+	virtual UniformSetID uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index, int p_linear_pool_index) override final;
+	virtual void linear_uniform_set_pools_reset( int p_linear_pool_index) override final;
+	// </TF>
 	virtual void uniform_set_free(UniformSetID p_uniform_set) override final;
 
 	// ----- COMMANDS -----
@@ -529,7 +600,13 @@ public:
 	// Binding.
 	virtual void command_bind_render_pipeline(CommandBufferID p_cmd_buffer, PipelineID p_pipeline) override final;
 	virtual void command_bind_render_uniform_set(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index) override final;
+	virtual void command_bind_render_uniform_sets(CommandBufferID p_cmd_buffer, VectorView<UniformSetID> p_uniform_sets, ShaderID p_shader, uint32_t p_first_set_index, uint32_t p_set_count) override final;
 
+// <TF>
+// @ShadyTF 
+// Dynamic uniform buffer 
+	virtual void command_bind_render_uniform_set_dynamic(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index, uint32_t p_offsets_count, const uint32_t* p_offsets) override final;
+// </TF>
 	// Drawing.
 	virtual void command_render_draw(CommandBufferID p_cmd_buffer, uint32_t p_vertex_count, uint32_t p_instance_count, uint32_t p_base_vertex, uint32_t p_first_instance) override final;
 	virtual void command_render_draw_indexed(CommandBufferID p_cmd_buffer, uint32_t p_index_count, uint32_t p_instance_count, uint32_t p_first_index, int32_t p_vertex_offset, uint32_t p_first_instance) override final;
@@ -571,6 +648,7 @@ public:
 	// Binding.
 	virtual void command_bind_compute_pipeline(CommandBufferID p_cmd_buffer, PipelineID p_pipeline) override final;
 	virtual void command_bind_compute_uniform_set(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index) override final;
+	virtual void command_bind_compute_uniform_sets(CommandBufferID p_cmd_buffer, VectorView<UniformSetID> p_uniform_sets, ShaderID p_shader, uint32_t p_first_set_index, uint32_t p_set_count) override final;
 
 	// Dispatching.
 	virtual void command_compute_dispatch(CommandBufferID p_cmd_buffer, uint32_t p_x_groups, uint32_t p_y_groups, uint32_t p_z_groups) override final;
@@ -603,6 +681,13 @@ public:
 	virtual void command_begin_label(CommandBufferID p_cmd_buffer, const char *p_label_name, const Color &p_color) override final;
 	virtual void command_end_label(CommandBufferID p_cmd_buffer) override final;
 
+	/****************/
+	/**** DEBUG *****/
+	/****************/
+	virtual void command_insert_breadcrumb(CommandBufferID p_cmd_buffer, uint32_t p_data) override final;
+	void print_lost_device_info();
+	void on_device_lost() const;
+
 	/********************/
 	/**** SUBMISSION ****/
 	/********************/
@@ -617,6 +702,10 @@ public:
 	virtual void set_object_name(ObjectType p_type, ID p_driver_id, const String &p_name) override final;
 	virtual uint64_t get_resource_native_handle(DriverResource p_type, ID p_driver_id) override final;
 	virtual uint64_t get_total_memory_used() override final;
+	// <TF>
+	// @ShadyTF lazily allocated memory
+	virtual uint64_t get_lazily_memory_used() override final;
+	// </TF>
 	virtual uint64_t limit_get(Limit p_limit) override final;
 	virtual uint64_t api_trait_get(ApiTrait p_trait) override final;
 	virtual bool has_feature(Features p_feature) override final;
@@ -645,5 +734,7 @@ public:
 	RenderingDeviceDriverVulkan(RenderingContextDriverVulkan *p_context_driver);
 	virtual ~RenderingDeviceDriverVulkan();
 };
+
+using VKC = RenderingContextDriverVulkan;
 
 #endif // RENDERING_DEVICE_DRIVER_VULKAN_H

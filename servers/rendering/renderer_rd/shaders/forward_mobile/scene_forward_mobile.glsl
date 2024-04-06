@@ -719,6 +719,7 @@ vec4 fog_process(vec3 vertex) {
 #define scene_data scene_data_block.data
 
 void main() {
+
 #ifdef MODE_DUAL_PARABOLOID
 
 	if (dp_clip > 0.0)
@@ -1045,6 +1046,8 @@ void main() {
 	vec3 specular_light = vec3(0.0, 0.0, 0.0);
 	vec3 diffuse_light = vec3(0.0, 0.0, 0.0);
 	vec3 ambient_light = vec3(0.0, 0.0, 0.0);
+	
+	
 
 #ifndef MODE_UNSHADED
 	// Used in regular draw pass and when drawing SDFs for SDFGI and materials for VoxelGI.
@@ -1751,6 +1754,7 @@ void main() {
 	}
 #else
 #ifdef MODE_RENDER_DEPTH
+	
 #ifdef USE_OPAQUE_PREPASS
 
 	if (alpha < scene_data.opaque_prepass_threshold) {
@@ -1768,7 +1772,7 @@ void main() {
 #ifdef MODE_RENDER_DEPTH
 
 #ifdef MODE_RENDER_MATERIAL
-
+	
 	albedo_output_buffer.rgb = albedo;
 	albedo_output_buffer.a = alpha;
 

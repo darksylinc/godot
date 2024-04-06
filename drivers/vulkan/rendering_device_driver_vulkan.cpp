@@ -35,6 +35,13 @@
 #include "thirdparty/misc/smolv.h"
 #include "vulkan_hooks.h"
 
+#if defined(ANDROID_ENABLED)
+#include "platform/android/java_godot_wrapper.h"
+#include "platform/android/os_android.h"
+#include "platform/android/thread_jandroid.h"
+#include "thirdparty/swappy-frame-pacing/swappyVk.h"
+#endif
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
 
 #define PRINT_NATIVE_COMMANDS 0
@@ -445,6 +452,29 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 		_register_requested_device_extension(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME, true);
 	}
 
+#if defined(VK_TRACK_DEVICE_MEMORY)
+	_register_requested_device_extension(VK_EXT_DEVICE_MEMORY_REPORT_EXTENSION_NAME, false);
+#endif
+	_register_requested_device_extension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME, false);
+
+	// <TF>
+	// @ShadyTF debug marker extensions
+	// Should be last element in the array
+
+#ifdef DEV_ENABLED
+	bool want_debug_markers = true;
+#else
+	bool want_debug_markers = OS::get_singleton()->is_stdout_verbose();
+#endif
+	if (want_debug_markers) {
+		_register_requested_device_extension(VK_EXT_DEBUG_MARKER_EXTENSION_NAME, false);
+	}
+	// </TF>
+
+	// <TF>
+	// @ShadyTF ASTC decode mode extension
+	_register_requested_device_extension(VK_EXT_ASTC_DECODE_MODE_EXTENSION_NAME, false);
+	// </TF>
 	uint32_t device_extension_count = 0;
 	VkResult err = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &device_extension_count, nullptr);
 	ERR_FAIL_COND_V(err != VK_SUCCESS, ERR_CANT_CREATE);
@@ -454,6 +484,38 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 	device_extensions.resize(device_extension_count);
 	err = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &device_extension_count, device_extensions.ptr());
 	ERR_FAIL_COND_V(err != VK_SUCCESS, ERR_CANT_CREATE);
+
+#if defined(ANDROID_ENABLED)
+	if (swappy_frame_pacer_enable) {
+		char **swappy_required_extensions;
+		uint32_t swappy_required_extensions_count = 0;
+		// Determine number of extensions required by Swappy frame pacer
+		SwappyVk_determineDeviceExtensions(physical_device, device_extension_count, device_extensions.ptr(), &swappy_required_extensions_count, nullptr);
+
+		if (swappy_required_extensions_count < device_extension_count && swappy_required_extensions_count < device_extension_count) {
+			// Determine the actual extensions
+			swappy_required_extensions = (char **)malloc(swappy_required_extensions_count * sizeof(char *));
+			char *pRequiredExtensionsData = (char *)malloc(swappy_required_extensions_count * (VK_MAX_EXTENSION_NAME_SIZE + 1));
+			for (uint32_t i = 0; i < swappy_required_extensions_count; i++) {
+				swappy_required_extensions[i] = &pRequiredExtensionsData[i * (VK_MAX_EXTENSION_NAME_SIZE + 1)];
+			}
+			SwappyVk_determineDeviceExtensions(physical_device, device_extension_count,
+					device_extensions.ptr(), &swappy_required_extensions_count, swappy_required_extensions);
+
+			// Enable extensions requested by Swappy
+			for (uint32_t i = 0; i < swappy_required_extensions_count; i++) {
+				CharString extension_name(swappy_required_extensions[i]);
+				if (requested_device_extensions.has(extension_name)) {
+					enabled_device_extension_names.insert(extension_name);
+				}
+			}
+
+			free(pRequiredExtensionsData);
+			free(swappy_required_extensions);
+		}
+	}
+
+#endif
 
 #ifdef DEV_ENABLED
 	for (uint32_t i = 0; i < device_extension_count; i++) {
@@ -688,6 +750,14 @@ Error RenderingDeviceDriverVulkan::_check_device_capabilities() {
 		if (enabled_device_extension_names.has(VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME)) {
 			pipeline_cache_control_support = pipeline_cache_control_features.pipelineCreationCacheControl;
 		}
+
+		if (enabled_device_extension_names.has(VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
+			device_fault_support = true;
+		}
+
+		if (enabled_device_extension_names.has(VK_EXT_DEVICE_MEMORY_REPORT_EXTENSION_NAME)) {
+			device_memory_report_support = true;
+		}
 	}
 
 	if (functions.GetPhysicalDeviceProperties2 != nullptr) {
@@ -854,6 +924,26 @@ Error RenderingDeviceDriverVulkan::_initialize_device(const LocalVector<VkDevice
 		create_info_next = &pipeline_cache_control_features;
 	}
 
+	VkPhysicalDeviceFaultFeaturesEXT device_fault_features = {};
+	if (device_fault_support) {
+		device_fault_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
+		device_fault_features.pNext = create_info_next;
+		create_info_next = &device_fault_features;
+	}
+
+#if defined(VK_TRACK_DEVICE_MEMORY)
+	VkDeviceDeviceMemoryReportCreateInfoEXT memory_report_info = {};
+	if (device_memory_report_support) {
+		memory_report_info.sType = VK_STRUCTURE_TYPE_DEVICE_DEVICE_MEMORY_REPORT_CREATE_INFO_EXT;
+		memory_report_info.pfnUserCallback = RenderingContextDriverVulkan::memory_report_callback;
+		memory_report_info.pNext = create_info_next;
+		memory_report_info.flags = 0;
+		memory_report_info.pUserData = this;
+
+		create_info_next = &memory_report_info;
+	}
+#endif
+
 	VkPhysicalDeviceVulkan11Features vulkan_1_1_features = {};
 	VkPhysicalDevice16BitStorageFeaturesKHR storage_features = {};
 	VkPhysicalDeviceMultiviewFeatures multiview_features = {};
@@ -909,7 +999,7 @@ Error RenderingDeviceDriverVulkan::_initialize_device(const LocalVector<VkDevice
 		bool device_created = VulkanHooks::get_singleton()->create_vulkan_device(&create_info, &vk_device);
 		ERR_FAIL_COND_V(!device_created, ERR_CANT_CREATE);
 	} else {
-		VkResult err = vkCreateDevice(physical_device, &create_info, nullptr, &vk_device);
+		VkResult err = vkCreateDevice(physical_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DEVICE), &vk_device);
 		ERR_FAIL_COND_V(err != VK_SUCCESS, ERR_CANT_CREATE);
 	}
 
@@ -930,6 +1020,16 @@ Error RenderingDeviceDriverVulkan::_initialize_device(const LocalVector<VkDevice
 		if (enabled_device_extension_names.has(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME)) {
 			device_functions.CreateRenderPass2KHR = PFN_vkCreateRenderPass2KHR(functions.GetDeviceProcAddr(vk_device, "vkCreateRenderPass2KHR"));
 		}
+
+	// <TF>
+	// @ShadyTF debug marker extensions
+	if (enabled_device_extension_names.has(VK_EXT_DEBUG_MARKER_EXTENSION_NAME)) {
+		vkCmdDebugMarkerBeginEXT = (PFN_vkCmdDebugMarkerBeginEXT)functions.GetDeviceProcAddr(vk_device, "vkCmdDebugMarkerBeginEXT");
+		vkCmdDebugMarkerEndEXT = (PFN_vkCmdDebugMarkerEndEXT)functions.GetDeviceProcAddr(vk_device, "vkCmdDebugMarkerEndEXT");
+		vkCmdDebugMarkerInsertEXT = (PFN_vkCmdDebugMarkerInsertEXT)functions.GetDeviceProcAddr(vk_device, "vkCmdDebugMarkerInsertEXT");
+		vkDebugMarkerSetObjectNameEXT = (PFN_vkDebugMarkerSetObjectNameEXT)functions.GetDeviceProcAddr(vk_device, "vkDebugMarkerSetObjectNameEXT");
+	}
+	// </TF>
 	}
 
 	return OK;
@@ -1085,17 +1185,104 @@ bool RenderingDeviceDriverVulkan::_recreate_image_semaphore(CommandQueue *p_comm
 	VkSemaphore semaphore;
 	VkSemaphoreCreateInfo create_info = {};
 	create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-	VkResult err = vkCreateSemaphore(vk_device, &create_info, nullptr, &semaphore);
+	VkResult err = vkCreateSemaphore(vk_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SEMAPHORE), &semaphore);
 	ERR_FAIL_COND_V(err != VK_SUCCESS, false);
 
 	// Indicate the semaphore is free again and destroy the previous one before storing the new one.
-	vkDestroySemaphore(vk_device, p_command_queue->image_semaphores[p_semaphore_index], nullptr);
+	vkDestroySemaphore(vk_device, p_command_queue->image_semaphores[p_semaphore_index], VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SEMAPHORE));
 
 	p_command_queue->image_semaphores[p_semaphore_index] = semaphore;
 	p_command_queue->free_image_semaphores.push_back(p_semaphore_index);
 
 	return true;
 }
+// <TF>
+// @ShadyTF debug marker extensions
+VkDebugReportObjectTypeEXT RenderingDeviceDriverVulkan::_convert_to_debug_report_objectType(VkObjectType p_object_type){
+	switch (p_object_type) {
+		case VK_OBJECT_TYPE_UNKNOWN:
+			return VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT;
+		case VK_OBJECT_TYPE_INSTANCE:
+	        return VK_DEBUG_REPORT_OBJECT_TYPE_INSTANCE_EXT;
+		case VK_OBJECT_TYPE_PHYSICAL_DEVICE:
+			return VK_DEBUG_REPORT_OBJECT_TYPE_PHYSICAL_DEVICE_EXT;
+		case VK_OBJECT_TYPE_DEVICE:
+	        return VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_EXT;
+	    case VK_OBJECT_TYPE_QUEUE:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_QUEUE_EXT;
+	    case VK_OBJECT_TYPE_SEMAPHORE:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_SEMAPHORE_EXT;
+	    case VK_OBJECT_TYPE_COMMAND_BUFFER:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT;
+	    case VK_OBJECT_TYPE_FENCE:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_FENCE_EXT;
+	    case VK_OBJECT_TYPE_DEVICE_MEMORY:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_MEMORY_EXT;
+	    case VK_OBJECT_TYPE_BUFFER:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT;
+	    case VK_OBJECT_TYPE_IMAGE:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT;
+	    case VK_OBJECT_TYPE_EVENT:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_EVENT_EXT;
+	    case VK_OBJECT_TYPE_QUERY_POOL:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_QUERY_POOL_EXT;
+	    case VK_OBJECT_TYPE_BUFFER_VIEW:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_VIEW_EXT;
+	    case VK_OBJECT_TYPE_IMAGE_VIEW:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_VIEW_EXT;
+	    case VK_OBJECT_TYPE_SHADER_MODULE:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT;
+	    case VK_OBJECT_TYPE_PIPELINE_CACHE:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_CACHE_EXT;
+	    case VK_OBJECT_TYPE_PIPELINE_LAYOUT:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT;
+	    case VK_OBJECT_TYPE_RENDER_PASS:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT;
+	    case VK_OBJECT_TYPE_PIPELINE:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT;
+	    case VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT_EXT;
+	    case VK_OBJECT_TYPE_SAMPLER:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_SAMPLER_EXT;
+	    case VK_OBJECT_TYPE_DESCRIPTOR_POOL:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_POOL_EXT;
+	    case VK_OBJECT_TYPE_DESCRIPTOR_SET:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_EXT;
+	    case VK_OBJECT_TYPE_FRAMEBUFFER:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_FRAMEBUFFER_EXT;
+	    case VK_OBJECT_TYPE_COMMAND_POOL:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_POOL_EXT;
+	    case VK_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION_EXT;
+	    case VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_EXT;
+		case VK_OBJECT_TYPE_SURFACE_KHR:
+			return VK_DEBUG_REPORT_OBJECT_TYPE_SURFACE_KHR_EXT;
+	    case VK_OBJECT_TYPE_SWAPCHAIN_KHR:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_SWAPCHAIN_KHR_EXT;
+	    case VK_OBJECT_TYPE_DISPLAY_KHR:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_DISPLAY_KHR_EXT;
+	    case VK_OBJECT_TYPE_DISPLAY_MODE_KHR:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_DISPLAY_MODE_KHR_EXT;
+	    case VK_OBJECT_TYPE_DEBUG_REPORT_CALLBACK_EXT:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_DEBUG_REPORT_CALLBACK_EXT_EXT;
+	    case VK_OBJECT_TYPE_CU_MODULE_NVX:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_CU_MODULE_NVX_EXT;
+	    case VK_OBJECT_TYPE_CU_FUNCTION_NVX:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_CU_FUNCTION_NVX_EXT;
+	    case VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR_EXT;
+		case VK_OBJECT_TYPE_VALIDATION_CACHE_EXT:
+			return VK_DEBUG_REPORT_OBJECT_TYPE_VALIDATION_CACHE_EXT_EXT;
+	    case VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV:
+		    return VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT;
+		default:
+			break;
+	}
+    
+    return VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT;
+}
+// </TF>
 
 void RenderingDeviceDriverVulkan::_set_object_name(VkObjectType p_object_type, uint64_t p_object_handle, String p_object_name) {
 	const RenderingContextDriverVulkan::Functions &functions = context_driver->functions_get();
@@ -1109,13 +1296,42 @@ void RenderingDeviceDriverVulkan::_set_object_name(VkObjectType p_object_type, u
 		name_info.pObjectName = obj_data.get_data();
 		functions.SetDebugUtilsObjectNameEXT(vk_device, &name_info);
 	}
+	// <TF>
+	// @ShadyTF debug marker extensions
+	else {
+		if (functions.vkDebugMarkerSetObjectNameEXT != nullptr) {
+			CharString obj_data = p_object_name.utf8();
+			VkDebugMarkerObjectNameInfoEXT name_info;
+			name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+			name_info.pNext = nullptr;
+			name_info.objectType = _convert_to_debug_report_objectType( p_object_type );
+			name_info.object = p_object_handle;
+			name_info.pObjectName = obj_data.get_data();
+			functions.vkDebugMarkerSetObjectNameEXT(vk_device, &name_info);
+		}
+	}
+	// </TF>
+
+
 }
 
 Error RenderingDeviceDriverVulkan::initialize(uint32_t p_device_index, uint32_t p_frame_count) {
 	context_device = context_driver->device_get(p_device_index);
 	physical_device = context_driver->physical_device_get(p_device_index);
 	vkGetPhysicalDeviceProperties(physical_device, &physical_device_properties);
-
+		
+	// <TF>
+	// @ShadyTF
+	// Workaround a driver bug on Adreno 730 GPUs that keeps leaking memory on each call to vkResetDescriptorPool.
+	// Which eventually run out of memory. in such case we should not be using linear allocated pools
+	// Bug introduced in driver 512.597.0 and fixed in 512.671.0
+	// Confirmed by Qualcomm
+	if (linear_descriptor_pools_enabled) {
+		const uint32_t reset_descriptor_pool_broken_driver_begin = VK_MAKE_VERSION( 512u, 597u, 0u );
+		const uint32_t reset_descriptor_pool_fixed_driver_begin = VK_MAKE_VERSION( 512u, 671u, 0u );
+		linear_descriptor_pools_enabled = physical_device_properties.driverVersion < reset_descriptor_pool_broken_driver_begin || physical_device_properties.driverVersion > reset_descriptor_pool_fixed_driver_begin;
+	}
+	// </TF>
 	frame_count = p_frame_count;
 
 	// Copy the queue family properties the context already retrieved.
@@ -1148,6 +1364,13 @@ Error RenderingDeviceDriverVulkan::initialize(uint32_t p_device_index, uint32_t 
 	ERR_FAIL_COND_V(err != OK, err);
 
 	max_descriptor_sets_per_pool = GLOBAL_GET("rendering/rendering_device/vulkan/max_descriptors_per_pool");
+	breadcrumb_buffer = buffer_create(sizeof(uint32_t), BufferUsageBits::BUFFER_USAGE_TRANSFER_TO_BIT, MemoryAllocationType::MEMORY_ALLOCATION_TYPE_CPU);
+
+#if defined(ANDROID_ENABLED)
+	swappy_frame_pacer_enable = GLOBAL_GET("display/window/frame_pacing/android/enable_frame_pacing");
+	swappy_enable_auto_swap = GLOBAL_GET("display/window/frame_pacing/android/enable_auto_swap");
+	swappy_target_framerate = GLOBAL_GET("display/window/frame_pacing/android/target_frame_rate");
+#endif
 
 	return OK;
 }
@@ -1216,11 +1439,17 @@ RDD::BufferID RenderingDeviceDriverVulkan::buffer_create(uint64_t p_size, BitFie
 				// Looks like a readback buffer: GPU copies from VRAM, then CPU maps and reads.
 				alloc_create_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
 			}
-			alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
 			alloc_create_info.requiredFlags = (VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 		} break;
 		case MEMORY_ALLOCATION_TYPE_GPU: {
-			alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+			// <TF>
+			// @ShadyTF
+			// condition to use persistent memory, UMA, condition would be passed in
+			if (p_usage & BUFFER_USAGE_PERSISTENT_BIT ) {
+				alloc_create_info.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+				alloc_create_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+			}
+			// </TF>
 			if (p_size <= SMALL_ALLOCATION_MAX_SIZE) {
 				uint32_t mem_type_index = 0;
 				vmaFindMemoryTypeIndexForBufferInfo(allocator, &create_info, &alloc_create_info, &mem_type_index);
@@ -1232,16 +1461,27 @@ RDD::BufferID RenderingDeviceDriverVulkan::buffer_create(uint64_t p_size, BitFie
 	VkBuffer vk_buffer = VK_NULL_HANDLE;
 	VmaAllocation allocation = nullptr;
 	VmaAllocationInfo alloc_info = {};
-	VkResult err = vmaCreateBuffer(allocator, &create_info, &alloc_create_info, &vk_buffer, &allocation, &alloc_info);
+
+	VkResult err = vkCreateBuffer(vk_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_BUFFER), &vk_buffer);
 	ERR_FAIL_COND_V_MSG(err, BufferID(), "Can't create buffer of size: " + itos(p_size) + ", error " + itos(err) + ".");
+	err = vmaAllocateMemoryForBuffer(allocator, vk_buffer, &alloc_create_info, &allocation, &alloc_info);
+	ERR_FAIL_COND_V_MSG(err, BufferID(), "Can't allocate memory for buffer of size: " + itos(p_size) + ", error " + itos(err) + ".");
+	err = vmaBindBufferMemory2(allocator, allocation, 0, vk_buffer, NULL);
+	ERR_FAIL_COND_V_MSG(err, BufferID(), "Can't bind memory to buffer of size: " + itos(p_size) + ", error " + itos(err) + ".");
+#if VMA_STATS_STRING_ENABLED
+	//allocation->InitBufferImageUsage(alloc_create_info.usage);
+#endif
 
 	// Bookkeep.
-
 	BufferInfo *buf_info = VersatileResource::allocate<BufferInfo>(resources_allocator);
 	buf_info->vk_buffer = vk_buffer;
 	buf_info->allocation.handle = allocation;
 	buf_info->allocation.size = alloc_info.size;
 	buf_info->size = p_size;
+	// <TF>
+	// @ShadyTF - Store persistent address
+	buf_info->mapped_address = (uint8_t*)alloc_info.pMappedData;
+	// </TF>
 
 	return BufferID(buf_info);
 }
@@ -1257,7 +1497,7 @@ bool RenderingDeviceDriverVulkan::buffer_set_texel_format(BufferID p_buffer, Dat
 	view_create_info.format = RD_TO_VK_FORMAT[p_format];
 	view_create_info.range = buf_info->allocation.size;
 
-	VkResult res = vkCreateBufferView(vk_device, &view_create_info, nullptr, &buf_info->vk_view);
+	VkResult res = vkCreateBufferView(vk_device, &view_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_BUFFER_VIEW), &buf_info->vk_view);
 	ERR_FAIL_COND_V_MSG(res, false, "Unable to create buffer view, error " + itos(res) + ".");
 
 	return true;
@@ -1266,9 +1506,12 @@ bool RenderingDeviceDriverVulkan::buffer_set_texel_format(BufferID p_buffer, Dat
 void RenderingDeviceDriverVulkan::buffer_free(BufferID p_buffer) {
 	BufferInfo *buf_info = (BufferInfo *)p_buffer.id;
 	if (buf_info->vk_view) {
-		vkDestroyBufferView(vk_device, buf_info->vk_view, nullptr);
+		vkDestroyBufferView(vk_device, buf_info->vk_view, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_BUFFER_VIEW));
 	}
-	vmaDestroyBuffer(allocator, buf_info->vk_buffer, buf_info->allocation.handle);
+
+	vkDestroyBuffer(vk_device, buf_info->vk_buffer, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_BUFFER));
+	vmaFreeMemory(allocator, buf_info->allocation.handle);
+
 	VersatileResource::free(resources_allocator, buf_info);
 }
 
@@ -1289,6 +1532,15 @@ void RenderingDeviceDriverVulkan::buffer_unmap(BufferID p_buffer) {
 	const BufferInfo *buf_info = (const BufferInfo *)p_buffer.id;
 	vmaUnmapMemory(allocator, buf_info->allocation.handle);
 }
+
+// <TF>
+// @ShadyTF : return persistent mapped adreess
+uint8_t* RenderingDeviceDriverVulkan::buffer_get_persistent_address( BufferID p_buffer ) {
+	//VkBuffer vk_buffer = (VkBuffer)p_buffer.id;
+	const BufferInfo *buf_info = (const BufferInfo *)p_buffer.id;
+	return buf_info->mapped_address;
+}
+// </TF>
 
 /*****************/
 /**** TEXTURE ****/
@@ -1451,7 +1703,27 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create(const TextureFormat &
 
 	VmaAllocationCreateInfo alloc_create_info = {};
 	alloc_create_info.flags = (p_format.usage_bits & TEXTURE_USAGE_CPU_READ_BIT) ? VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT : 0;
-	alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+
+
+	//<TF>
+	//@ShadyTF : lazily allocated buffers
+	if (p_format.usage_bits & TEXTURE_USAGE_LAZILY_ALLOCATED_BIT) {
+		uint32_t memoryTypeIndex = 0;
+		VmaAllocationCreateInfo lazy_memory_requirements = alloc_create_info;
+		lazy_memory_requirements.usage = VMA_MEMORY_USAGE_GPU_LAZILY_ALLOCATED;
+		VkResult result = vmaFindMemoryTypeIndex(allocator, UINT32_MAX, &lazy_memory_requirements, &memoryTypeIndex);
+		if (VK_SUCCESS == result) {
+			alloc_create_info = lazy_memory_requirements;
+			create_info.usage |= VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+			// VUID-VkImageCreateInfo-usage-00963 :
+			// If usage includes VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
+			// then bits other than VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+			// and VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT must not be set
+			create_info.usage &= (VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT);
+		}
+	}
+	//</TF>
+
 	if (image_size <= SMALL_ALLOCATION_MAX_SIZE) {
 		uint32_t mem_type_index = 0;
 		vmaFindMemoryTypeIndexForImageInfo(allocator, &create_info, &alloc_create_info, &mem_type_index);
@@ -1463,8 +1735,16 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create(const TextureFormat &
 	VkImage vk_image = VK_NULL_HANDLE;
 	VmaAllocation allocation = nullptr;
 	VmaAllocationInfo alloc_info = {};
-	VkResult err = vmaCreateImage(allocator, &create_info, &alloc_create_info, &vk_image, &allocation, &alloc_info);
-	ERR_FAIL_COND_V_MSG(err, TextureID(), "vmaCreateImage failed with error " + itos(err) + ".");
+
+	VkResult err = vkCreateImage(vk_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE), &vk_image);
+	ERR_FAIL_COND_V_MSG(err, TextureID(), "vkCreateImage failed with error " + itos(err) + ".");
+	err = vmaAllocateMemoryForImage(allocator, vk_image, &alloc_create_info, &allocation, &alloc_info);
+	ERR_FAIL_COND_V_MSG(err, TextureID(), "Can't allocate memory for image, error: " + itos(err) + ".");
+	err = vmaBindImageMemory2(allocator, allocation, 0, vk_image, NULL);
+	ERR_FAIL_COND_V_MSG(err, TextureID(), "Can't bind memory to image, error: " + itos(err) + ".");
+#if VMA_STATS_STRING_ENABLED
+	//allocation->InitBufferImageUsage(alloc_create_info.usage);
+#endif
 
 	// Create view.
 
@@ -1485,16 +1765,33 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create(const TextureFormat &
 		image_view_create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	}
 
+   	// <TF>
+	// @ShadyTF ASTC decode mode extension
+	VkImageViewASTCDecodeModeEXT decode_mode;
+    if (enabled_device_extension_names.has(VK_EXT_ASTC_DECODE_MODE_EXTENSION_NAME)) {
+		if (image_view_create_info.format >= VK_FORMAT_ASTC_4x4_UNORM_BLOCK
+        && image_view_create_info.format <= VK_FORMAT_ASTC_12x12_SRGB_BLOCK ) {
+			create_info.extent.height = p_format.height;
+			decode_mode.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_ASTC_DECODE_MODE_EXT;
+			decode_mode.pNext = nullptr;
+			decode_mode.decodeMode = VK_FORMAT_R8G8B8A8_UNORM;
+			image_view_create_info.pNext = &decode_mode;
+		}
+    }
+    // </TF>
+
 	VkImageView vk_image_view = VK_NULL_HANDLE;
-	err = vkCreateImageView(vk_device, &image_view_create_info, nullptr, &vk_image_view);
+	err = vkCreateImageView(vk_device, &image_view_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW), &vk_image_view);
 	if (err) {
-		vmaDestroyImage(allocator, vk_image, allocation);
+		vkDestroyImage(vk_device, vk_image, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE));
+		vmaFreeMemory(allocator, allocation);
 		ERR_FAIL_COND_V_MSG(err, TextureID(), "vkCreateImageView failed with error " + itos(err) + ".");
 	}
 
 	// Bookkeep.
 
 	TextureInfo *tex_info = VersatileResource::allocate<TextureInfo>(resources_allocator);
+	tex_info->vk_image = vk_image;
 	tex_info->vk_view = vk_image_view;
 	tex_info->rd_format = p_format.format;
 	tex_info->vk_create_info = create_info;
@@ -1528,7 +1825,7 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_from_extension(uint64
 	image_view_create_info.subresourceRange.aspectMask = p_depth_stencil ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 
 	VkImageView vk_image_view = VK_NULL_HANDLE;
-	VkResult err = vkCreateImageView(vk_device, &image_view_create_info, nullptr, &vk_image_view);
+	VkResult err = vkCreateImageView(vk_device, &image_view_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW), &vk_image_view);
 	if (err) {
 		ERR_FAIL_COND_V_MSG(err, TextureID(), "vkCreateImageView failed with error " + itos(err) + ".");
 	}
@@ -1583,7 +1880,7 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_shared(TextureID p_or
 	}
 
 	VkImageView new_vk_image_view = VK_NULL_HANDLE;
-	VkResult err = vkCreateImageView(vk_device, &image_view_create_info, nullptr, &new_vk_image_view);
+	VkResult err = vkCreateImageView(vk_device, &image_view_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW), &new_vk_image_view);
 	ERR_FAIL_COND_V_MSG(err, TextureID(), "vkCreateImageView failed with error " + itos(err) + ".");
 
 	// Bookkeep.
@@ -1636,7 +1933,7 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_shared_from_slice(Tex
 	image_view_create_info.subresourceRange.layerCount = p_layers;
 
 	VkImageView new_vk_image_view = VK_NULL_HANDLE;
-	VkResult err = vkCreateImageView(vk_device, &image_view_create_info, nullptr, &new_vk_image_view);
+	VkResult err = vkCreateImageView(vk_device, &image_view_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW), &new_vk_image_view);
 	ERR_FAIL_COND_V_MSG(err, TextureID(), "vkCreateImageView failed with error " + itos(err) + ".");
 
 	// Bookkeep.
@@ -1656,9 +1953,10 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create_shared_from_slice(Tex
 
 void RenderingDeviceDriverVulkan::texture_free(TextureID p_texture) {
 	TextureInfo *tex_info = (TextureInfo *)p_texture.id;
-	vkDestroyImageView(vk_device, tex_info->vk_view, nullptr);
+	vkDestroyImageView(vk_device, tex_info->vk_view, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW));
 	if (tex_info->allocation.handle) {
-		vmaDestroyImage(allocator, tex_info->vk_view_create_info.image, tex_info->allocation.handle);
+		vkDestroyImage(vk_device, tex_info->vk_image, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_BUFFER));
+		vmaFreeMemory(allocator, tex_info->allocation.handle);
 	}
 	VersatileResource::free(resources_allocator, tex_info);
 }
@@ -1737,7 +2035,7 @@ uint8_t *RenderingDeviceDriverVulkan::texture_map(TextureID p_texture, const Tex
 
 void RenderingDeviceDriverVulkan::texture_unmap(TextureID p_texture) {
 	const TextureInfo *tex_info = (const TextureInfo *)p_texture.id;
-	vkUnmapMemory(vk_device, tex_info->allocation.info.deviceMemory);
+	vmaUnmapMemory(allocator, tex_info->allocation.handle);
 }
 
 BitField<RDD::TextureUsageBits> RenderingDeviceDriverVulkan::texture_get_usages_supported_by_format(DataFormat p_format, bool p_cpu_readable) {
@@ -1813,14 +2111,14 @@ RDD::SamplerID RenderingDeviceDriverVulkan::sampler_create(const SamplerState &p
 	sampler_create_info.unnormalizedCoordinates = p_state.unnormalized_uvw;
 
 	VkSampler vk_sampler = VK_NULL_HANDLE;
-	VkResult res = vkCreateSampler(vk_device, &sampler_create_info, nullptr, &vk_sampler);
+	VkResult res = vkCreateSampler(vk_device, &sampler_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SAMPLER), &vk_sampler);
 	ERR_FAIL_COND_V_MSG(res, SamplerID(), "vkCreateSampler failed with error " + itos(res) + ".");
 
 	return SamplerID(vk_sampler);
 }
 
 void RenderingDeviceDriverVulkan::sampler_free(SamplerID p_sampler) {
-	vkDestroySampler(vk_device, (VkSampler)p_sampler.id, nullptr);
+	vkDestroySampler(vk_device, (VkSampler)p_sampler.id, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SAMPLER));
 }
 
 bool RenderingDeviceDriverVulkan::sampler_is_format_supported_for_filter(DataFormat p_format, SamplerFilter p_filter) {
@@ -1998,7 +2296,7 @@ RDD::FenceID RenderingDeviceDriverVulkan::fence_create() {
 	VkFence vk_fence = VK_NULL_HANDLE;
 	VkFenceCreateInfo create_info = {};
 	create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-	VkResult err = vkCreateFence(vk_device, &create_info, nullptr, &vk_fence);
+	VkResult err = vkCreateFence(vk_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_FENCE), &vk_fence);
 	ERR_FAIL_COND_V(err != VK_SUCCESS, FenceID());
 
 	Fence *fence = memnew(Fence);
@@ -2009,10 +2307,13 @@ RDD::FenceID RenderingDeviceDriverVulkan::fence_create() {
 
 Error RenderingDeviceDriverVulkan::fence_wait(FenceID p_fence) {
 	Fence *fence = (Fence *)(p_fence.id);
-	VkResult err = vkWaitForFences(vk_device, 1, &fence->vk_fence, VK_TRUE, UINT64_MAX);
-	ERR_FAIL_COND_V(err != VK_SUCCESS, FAILED);
+	VkResult fence_status = vkGetFenceStatus(vk_device, fence->vk_fence);
+	if (fence_status == VK_NOT_READY) {
+		VkResult err = vkWaitForFences(vk_device, 1, &fence->vk_fence, VK_TRUE, UINT64_MAX);
+		ERR_FAIL_COND_V(err != VK_SUCCESS, FAILED);
+	}
 
-	err = vkResetFences(vk_device, 1, &fence->vk_fence);
+	VkResult err = vkResetFences(vk_device, 1, &fence->vk_fence);
 	ERR_FAIL_COND_V(err != VK_SUCCESS, FAILED);
 
 	if (fence->queue_signaled_from != nullptr) {
@@ -2037,7 +2338,7 @@ Error RenderingDeviceDriverVulkan::fence_wait(FenceID p_fence) {
 
 void RenderingDeviceDriverVulkan::fence_free(FenceID p_fence) {
 	Fence *fence = (Fence *)(p_fence.id);
-	vkDestroyFence(vk_device, fence->vk_fence, nullptr);
+	vkDestroyFence(vk_device, fence->vk_fence, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_FENCE));
 	memdelete(fence);
 }
 
@@ -2049,14 +2350,14 @@ RDD::SemaphoreID RenderingDeviceDriverVulkan::semaphore_create() {
 	VkSemaphore semaphore = VK_NULL_HANDLE;
 	VkSemaphoreCreateInfo create_info = {};
 	create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-	VkResult err = vkCreateSemaphore(vk_device, &create_info, nullptr, &semaphore);
+	VkResult err = vkCreateSemaphore(vk_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SEMAPHORE), &semaphore);
 	ERR_FAIL_COND_V(err != VK_SUCCESS, SemaphoreID());
 
 	return SemaphoreID(semaphore);
 }
 
 void RenderingDeviceDriverVulkan::semaphore_free(SemaphoreID p_semaphore) {
-	vkDestroySemaphore(vk_device, VkSemaphore(p_semaphore.id), nullptr);
+	vkDestroySemaphore(vk_device, VkSemaphore(p_semaphore.id), VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SEMAPHORE));
 }
 
 /******************/
@@ -2115,6 +2416,14 @@ RDD::CommandQueueID RenderingDeviceDriverVulkan::command_queue_create(CommandQue
 	}
 
 	ERR_FAIL_COND_V_MSG(picked_queue_index >= queue_family.size(), CommandQueueID(), "A queue in the picked family could not be found.");
+
+#if defined(ANDROID_ENABLED)
+	if (swappy_frame_pacer_enable) {
+		VkQueue selected_queue;
+		vkGetDeviceQueue(vk_device, family_index, picked_queue_index, &selected_queue);
+		SwappyVk_setQueueFamilyIndex(vk_device, selected_queue, family_index);
+	}
+#endif
 
 	// Create the virtual queue.
 	CommandQueue *command_queue = memnew(CommandQueue);
@@ -2183,7 +2492,7 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 				create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
 				for (uint32_t i = 0; i < frame_count; i++) {
-					err = vkCreateSemaphore(vk_device, &create_info, nullptr, &semaphore);
+					err = vkCreateSemaphore(vk_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SEMAPHORE), &semaphore);
 					ERR_FAIL_COND_V(err != VK_SUCCESS, FAILED);
 					command_queue->present_semaphores.push_back(semaphore);
 				}
@@ -2210,6 +2519,11 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 		device_queue.submit_mutex.lock();
 		err = vkQueueSubmit(device_queue.queue, 1, &submit_info, vk_fence);
 		device_queue.submit_mutex.unlock();
+
+		if (err == VK_ERROR_DEVICE_LOST) {
+			print_lost_device_info();
+			CRASH_NOW_MSG("Vulkan device was lost.");
+		}
 		ERR_FAIL_COND_V(err != VK_SUCCESS, FAILED);
 
 		if (fence != nullptr && !command_queue->pending_semaphores_for_fence.is_empty()) {
@@ -2256,7 +2570,16 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 		present_info.pResults = results.ptr();
 
 		device_queue.submit_mutex.lock();
+#if defined(ANDROID_ENABLED)
+		if (swappy_frame_pacer_enable) {
+			err = SwappyVk_queuePresent(device_queue.queue, &present_info);
+		} else {
+			err = device_functions.QueuePresentKHR(device_queue.queue, &present_info);
+		}
+#else
 		err = device_functions.QueuePresentKHR(device_queue.queue, &present_info);
+#endif
+
 		device_queue.submit_mutex.unlock();
 
 		// Set the index to an invalid value. If any of the swap chains returned out of date, indicate it should be resized the next time it's acquired.
@@ -2301,12 +2624,12 @@ void RenderingDeviceDriverVulkan::command_queue_free(CommandQueueID p_cmd_queue)
 
 	// Erase all the semaphores used for presentation.
 	for (VkSemaphore semaphore : command_queue->present_semaphores) {
-		vkDestroySemaphore(vk_device, semaphore, nullptr);
+		vkDestroySemaphore(vk_device, semaphore, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SEMAPHORE));
 	}
 
 	// Erase all the semaphores used for image acquisition.
 	for (VkSemaphore semaphore : command_queue->image_semaphores) {
-		vkDestroySemaphore(vk_device, semaphore, nullptr);
+		vkDestroySemaphore(vk_device, semaphore, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SEMAPHORE));
 	}
 
 	// Retrieve the queue family corresponding to the virtual queue.
@@ -2331,10 +2654,14 @@ RDD::CommandPoolID RenderingDeviceDriverVulkan::command_pool_create(CommandQueue
 	VkCommandPoolCreateInfo cmd_pool_info = {};
 	cmd_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
 	cmd_pool_info.queueFamilyIndex = family_index;
-	cmd_pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+	// @NicolaTF: manually reset command pool
+	if (!command_pool_reset_enabled) {
+		cmd_pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	}
 
 	VkCommandPool vk_command_pool = VK_NULL_HANDLE;
-	VkResult res = vkCreateCommandPool(vk_device, &cmd_pool_info, nullptr, &vk_command_pool);
+	VkResult res = vkCreateCommandPool(vk_device, &cmd_pool_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_COMMAND_POOL), &vk_command_pool);
 	ERR_FAIL_COND_V_MSG(res, CommandPoolID(), "vkCreateCommandPool failed with error " + itos(res) + ".");
 
 	CommandPool *command_pool = memnew(CommandPool);
@@ -2343,11 +2670,21 @@ RDD::CommandPoolID RenderingDeviceDriverVulkan::command_pool_create(CommandQueue
 	return CommandPoolID(command_pool);
 }
 
+bool RenderingDeviceDriverVulkan::command_pool_reset(CommandPoolID p_cmd_pool) {
+	DEV_ASSERT(p_cmd_pool);
+
+	CommandPool *command_pool = (CommandPool *)(p_cmd_pool.id);
+	VkResult err = vkResetCommandPool(vk_device, command_pool->vk_command_pool, 0);
+	ERR_FAIL_COND_V_MSG(err, false, "vkResetCommandPool failed with error " + itos(err) + ".");
+
+	return true;
+}
+
 void RenderingDeviceDriverVulkan::command_pool_free(CommandPoolID p_cmd_pool) {
 	DEV_ASSERT(p_cmd_pool);
 
 	CommandPool *command_pool = (CommandPool *)(p_cmd_pool.id);
-	vkDestroyCommandPool(vk_device, command_pool->vk_command_pool, nullptr);
+	vkDestroyCommandPool(vk_device, command_pool->vk_command_pool, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_COMMAND_POOL));
 	memdelete(command_pool);
 }
 
@@ -2376,8 +2713,6 @@ RDD::CommandBufferID RenderingDeviceDriverVulkan::command_buffer_create(CommandP
 }
 
 bool RenderingDeviceDriverVulkan::command_buffer_begin(CommandBufferID p_cmd_buffer) {
-	// Reset is implicit (VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT).
-
 	VkCommandBufferBeginInfo cmd_buf_begin_info = {};
 	cmd_buf_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	cmd_buf_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -2389,8 +2724,6 @@ bool RenderingDeviceDriverVulkan::command_buffer_begin(CommandBufferID p_cmd_buf
 }
 
 bool RenderingDeviceDriverVulkan::command_buffer_begin_secondary(CommandBufferID p_cmd_buffer, RenderPassID p_render_pass, uint32_t p_subpass, FramebufferID p_framebuffer) {
-	// Reset is implicit (VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT).
-
 	VkCommandBufferInheritanceInfo inheritance_info = {};
 	inheritance_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
 	inheritance_info.renderPass = (VkRenderPass)p_render_pass.id;
@@ -2427,7 +2760,7 @@ void RenderingDeviceDriverVulkan::_swap_chain_release(SwapChain *swap_chain) {
 	}
 
 	for (VkImageView view : swap_chain->image_views) {
-		vkDestroyImageView(vk_device, view, nullptr);
+		vkDestroyImageView(vk_device, view, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW));
 	}
 
 	swap_chain->image_index = UINT_MAX;
@@ -2436,7 +2769,12 @@ void RenderingDeviceDriverVulkan::_swap_chain_release(SwapChain *swap_chain) {
 	swap_chain->framebuffers.clear();
 
 	if (swap_chain->vk_swapchain != VK_NULL_HANDLE) {
-		device_functions.DestroySwapchainKHR(vk_device, swap_chain->vk_swapchain, nullptr);
+#if defined(ANDROID_ENABLED)
+		if (swappy_frame_pacer_enable) {
+			SwappyVk_destroySwapchain(vk_device, swap_chain->vk_swapchain);
+		}
+#endif
+		device_functions.DestroySwapchainKHR(vk_device, swap_chain->vk_swapchain, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SWAPCHAIN_KHR));
 		swap_chain->vk_swapchain = VK_NULL_HANDLE;
 	}
 
@@ -2518,7 +2856,7 @@ RenderingDeviceDriver::SwapChainID RenderingDeviceDriverVulkan::swap_chain_creat
 	pass_info.pSubpasses = &subpass;
 
 	VkRenderPass render_pass = VK_NULL_HANDLE;
-	err = _create_render_pass(vk_device, &pass_info, nullptr, &render_pass);
+	err = _create_render_pass(vk_device, &pass_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_RENDER_PASS), &render_pass);
 	ERR_FAIL_COND_V(err != VK_SUCCESS, SwapChainID());
 
 	SwapChain *swap_chain = memnew(SwapChain);
@@ -2551,6 +2889,20 @@ Error RenderingDeviceDriverVulkan::swap_chain_resize(CommandQueueID p_cmd_queue,
 	VkSurfaceCapabilitiesKHR surface_capabilities = {};
 	VkResult err = functions.GetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface->vk_surface, &surface_capabilities);
 	ERR_FAIL_COND_V(err != VK_SUCCESS, ERR_CANT_CREATE);
+
+	// No swapchain yet, this is the first time we're creating it
+	if (!swap_chain->vk_swapchain) {
+		uint32_t width = surface_capabilities.currentExtent.width;
+		uint32_t height = surface_capabilities.currentExtent.height;
+		if (surface_capabilities.currentTransform & VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
+				surface_capabilities.currentTransform & VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR) {
+			// Swap to get identity width and height
+			surface_capabilities.currentExtent.height = width;
+			surface_capabilities.currentExtent.width = height;
+		}
+
+		native_display_size = surface_capabilities.currentExtent;
+	}
 
 	VkExtent2D extent;
 	if (surface_capabilities.currentExtent.width == 0xFFFFFFFF) {
@@ -2618,15 +2970,8 @@ Error RenderingDeviceDriverVulkan::swap_chain_resize(CommandQueueID p_cmd_queue,
 		desired_swapchain_images = MIN(desired_swapchain_images, surface_capabilities.maxImageCount);
 	}
 
-	// Prefer identity transform if it's supported, use the current transform otherwise.
-	// This behavior is intended as Godot does not supported native rotation in platforms that use these bits.
 	// Refer to the comment in command_queue_present() for more details.
-	VkSurfaceTransformFlagBitsKHR surface_transform_bits;
-	if (surface_capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) {
-		surface_transform_bits = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-	} else {
-		surface_transform_bits = surface_capabilities.currentTransform;
-	}
+	VkSurfaceTransformFlagBitsKHR surface_transform_bits = surface_capabilities.currentTransform;
 
 	VkCompositeAlphaFlagBitsKHR composite_alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 	if (OS::get_singleton()->is_layered_allowed() || !(surface_capabilities.supportedCompositeAlpha & composite_alpha)) {
@@ -2652,7 +2997,7 @@ Error RenderingDeviceDriverVulkan::swap_chain_resize(CommandQueueID p_cmd_queue,
 	swap_create_info.minImageCount = desired_swapchain_images;
 	swap_create_info.imageFormat = swap_chain->format;
 	swap_create_info.imageColorSpace = swap_chain->color_space;
-	swap_create_info.imageExtent = extent;
+	swap_create_info.imageExtent = native_display_size;
 	swap_create_info.imageArrayLayers = 1;
 	swap_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	swap_create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -2660,8 +3005,19 @@ Error RenderingDeviceDriverVulkan::swap_chain_resize(CommandQueueID p_cmd_queue,
 	swap_create_info.compositeAlpha = composite_alpha;
 	swap_create_info.presentMode = present_mode;
 	swap_create_info.clipped = true;
-	err = device_functions.CreateSwapchainKHR(vk_device, &swap_create_info, nullptr, &swap_chain->vk_swapchain);
+	err = device_functions.CreateSwapchainKHR(vk_device, &swap_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SWAPCHAIN_KHR), &swap_chain->vk_swapchain);
 	ERR_FAIL_COND_V(err != VK_SUCCESS, ERR_CANT_CREATE);
+
+#if defined(ANDROID_ENABLED)
+	if (swappy_frame_pacer_enable) {
+		uint64_t refresh_duration;
+		SwappyVk_initAndGetRefreshCycleDuration(get_jni_env(), static_cast<OS_Android *>(OS::get_singleton())->get_godot_java()->get_activity(), physical_device,
+				vk_device, swap_chain->vk_swapchain, &refresh_duration);
+		SwappyVk_setSwapIntervalNS(vk_device, swap_chain->vk_swapchain, MAX(refresh_duration, (1.0f / swappy_target_framerate) * 1000 * 1000 * 1000));
+		SwappyVk_setAutoSwapInterval(swappy_enable_auto_swap);
+		SwappyVk_setWindow(vk_device, swap_chain->vk_swapchain, static_cast<OS_Android *>(OS::get_singleton())->get_native_window());
+	}
+#endif
 
 	uint32_t image_count = 0;
 	err = device_functions.GetSwapchainImagesKHR(vk_device, swap_chain->vk_swapchain, &image_count, nullptr);
@@ -2688,7 +3044,7 @@ Error RenderingDeviceDriverVulkan::swap_chain_resize(CommandQueueID p_cmd_queue,
 	VkImageView image_view;
 	for (uint32_t i = 0; i < image_count; i++) {
 		view_create_info.image = swap_chain->images[i];
-		err = vkCreateImageView(vk_device, &view_create_info, nullptr, &image_view);
+		err = vkCreateImageView(vk_device, &view_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_IMAGE_VIEW), &image_view);
 		ERR_FAIL_COND_V(err != VK_SUCCESS, ERR_CANT_CREATE);
 
 		swap_chain->image_views.push_back(image_view);
@@ -2707,7 +3063,7 @@ Error RenderingDeviceDriverVulkan::swap_chain_resize(CommandQueueID p_cmd_queue,
 	VkFramebuffer framebuffer;
 	for (uint32_t i = 0; i < image_count; i++) {
 		fb_create_info.pAttachments = &swap_chain->image_views[i];
-		err = vkCreateFramebuffer(vk_device, &fb_create_info, nullptr, &framebuffer);
+		err = vkCreateFramebuffer(vk_device, &fb_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_FRAMEBUFFER), &framebuffer);
 		ERR_FAIL_COND_V(err != VK_SUCCESS, ERR_CANT_CREATE);
 
 		swap_chain->framebuffers.push_back(RDD::FramebufferID(framebuffer));
@@ -2738,7 +3094,7 @@ RDD::FramebufferID RenderingDeviceDriverVulkan::swap_chain_acquire_framebuffer(C
 		// Add a new semaphore if none are free.
 		VkSemaphoreCreateInfo create_info = {};
 		create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-		err = vkCreateSemaphore(vk_device, &create_info, nullptr, &semaphore);
+		err = vkCreateSemaphore(vk_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SEMAPHORE), &semaphore);
 		ERR_FAIL_COND_V(err != VK_SUCCESS, FramebufferID());
 
 		semaphore_index = command_queue->image_semaphores.size();
@@ -2810,7 +3166,7 @@ void RenderingDeviceDriverVulkan::swap_chain_free(SwapChainID p_swap_chain) {
 	_swap_chain_release(swap_chain);
 
 	if (swap_chain->render_pass.id != 0) {
-		vkDestroyRenderPass(vk_device, VkRenderPass(swap_chain->render_pass.id), nullptr);
+		vkDestroyRenderPass(vk_device, VkRenderPass(swap_chain->render_pass.id), VKC::get_allocation_callbacks(VK_OBJECT_TYPE_RENDER_PASS));
 	}
 
 	memdelete(swap_chain);
@@ -2836,7 +3192,7 @@ RDD::FramebufferID RenderingDeviceDriverVulkan::framebuffer_create(RenderPassID 
 	framebuffer_create_info.layers = 1;
 
 	VkFramebuffer vk_framebuffer = VK_NULL_HANDLE;
-	VkResult err = vkCreateFramebuffer(vk_device, &framebuffer_create_info, nullptr, &vk_framebuffer);
+	VkResult err = vkCreateFramebuffer(vk_device, &framebuffer_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_FRAMEBUFFER), &vk_framebuffer);
 	ERR_FAIL_COND_V_MSG(err, FramebufferID(), "vkCreateFramebuffer failed with error " + itos(err) + ".");
 
 #if PRINT_NATIVE_COMMANDS
@@ -2851,7 +3207,7 @@ RDD::FramebufferID RenderingDeviceDriverVulkan::framebuffer_create(RenderPassID 
 }
 
 void RenderingDeviceDriverVulkan::framebuffer_free(FramebufferID p_framebuffer) {
-	vkDestroyFramebuffer(vk_device, (VkFramebuffer)p_framebuffer.id, nullptr);
+	vkDestroyFramebuffer(vk_device, (VkFramebuffer)p_framebuffer.id, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_FRAMEBUFFER));
 }
 
 /****************/
@@ -3043,8 +3399,14 @@ Vector<uint8_t> RenderingDeviceDriverVulkan::shader_compile_binary_from_spirv(Ve
 
 	return ret;
 }
-
-RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name) {
+// <TF>
+// @ShadyTF
+// adding support of immutable samplers, which can be embedded when creating the pipeline layout on the condition they remain
+// valid and unchanged, so they don't need to be specified when creating uniform sets
+// Was:
+//RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name) {
+RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name, const Vector<ImmutableSampler>& r_immutableSamplers) {
+// </TF>
 	r_shader_desc = {}; // Driver-agnostic.
 	ShaderInfo shader_info; // Driver-specific.
 
@@ -3116,6 +3478,22 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 				case UNIFORM_TYPE_SAMPLER: {
 					layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
 					layout_binding.descriptorCount = set_ptr[j].length;
+// <TF>
+// @ShadyTF
+// Immutable samplers : here they get set in the layoutbinding, given that  they will not be changed later
+					int immutable_bind_index = -1;
+					if (immutable_samplers_enabled && r_immutableSamplers.size() > 0) {
+						for (int k = 0; k < r_immutableSamplers.size(); k++) {
+							if (r_immutableSamplers[k].binding == layout_binding.binding) {
+								immutable_bind_index = k;
+								break;
+							}
+						}
+						if (immutable_bind_index >= 0) {
+							layout_binding.pImmutableSamplers = (VkSampler*)&r_immutableSamplers[immutable_bind_index].ids[0].id;
+						}
+					}
+// </TF>
 				} break;
 				case UNIFORM_TYPE_SAMPLER_WITH_TEXTURE: {
 					layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -3139,6 +3517,13 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 				case UNIFORM_TYPE_UNIFORM_BUFFER: {
 					layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 				} break;
+// <TF>
+// @ShadyTF 
+// Dynamic uniform buffer 
+				case UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC: {
+					layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+				} break;
+// </TF>
 				case UNIFORM_TYPE_STORAGE_BUFFER: {
 					layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 				} break;
@@ -3228,7 +3613,7 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 		shader_module_create_info.pCode = (const uint32_t *)stages_spirv[i].ptr();
 
 		VkShaderModule vk_module = VK_NULL_HANDLE;
-		VkResult res = vkCreateShaderModule(vk_device, &shader_module_create_info, nullptr, &vk_module);
+		VkResult res = vkCreateShaderModule(vk_device, &shader_module_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SHADER_MODULE), &vk_module);
 		if (res) {
 			error_text = "Error (" + itos(res) + ") creating shader module for stage: " + String(SHADER_STAGE_NAMES[r_shader_desc.stages[i]]);
 			break;
@@ -3255,7 +3640,7 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 			layout_create_info.pBindings = vk_set_bindings[i].ptr();
 
 			VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-			VkResult res = vkCreateDescriptorSetLayout(vk_device, &layout_create_info, nullptr, &layout);
+			VkResult res = vkCreateDescriptorSetLayout(vk_device, &layout_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT), &layout);
 			if (res) {
 				error_text = "Error (" + itos(res) + ") creating descriptor set layout for set " + itos(i);
 				break;
@@ -3282,7 +3667,7 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 			pipeline_layout_create_info.pPushConstantRanges = push_constant_range;
 		}
 
-		VkResult err = vkCreatePipelineLayout(vk_device, &pipeline_layout_create_info, nullptr, &shader_info.vk_pipeline_layout);
+		VkResult err = vkCreatePipelineLayout(vk_device, &pipeline_layout_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_PIPELINE_LAYOUT), &shader_info.vk_pipeline_layout);
 		if (err) {
 			error_text = "Error (" + itos(err) + ") creating pipeline layout.";
 		}
@@ -3291,10 +3676,10 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 	if (!error_text.is_empty()) {
 		// Clean up if failed.
 		for (uint32_t i = 0; i < shader_info.vk_stages_create_info.size(); i++) {
-			vkDestroyShaderModule(vk_device, shader_info.vk_stages_create_info[i].module, nullptr);
+			vkDestroyShaderModule(vk_device, shader_info.vk_stages_create_info[i].module, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SHADER_MODULE));
 		}
 		for (uint32_t i = 0; i < binary_data.set_count; i++) {
-			vkDestroyDescriptorSetLayout(vk_device, shader_info.vk_descriptor_set_layouts[i], nullptr);
+			vkDestroyDescriptorSetLayout(vk_device, shader_info.vk_descriptor_set_layouts[i], VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT));
 		}
 
 		ERR_FAIL_V_MSG(ShaderID(), error_text);
@@ -3311,24 +3696,62 @@ void RenderingDeviceDriverVulkan::shader_free(ShaderID p_shader) {
 	ShaderInfo *shader_info = (ShaderInfo *)p_shader.id;
 
 	for (uint32_t i = 0; i < shader_info->vk_descriptor_set_layouts.size(); i++) {
-		vkDestroyDescriptorSetLayout(vk_device, shader_info->vk_descriptor_set_layouts[i], nullptr);
+		vkDestroyDescriptorSetLayout(vk_device, shader_info->vk_descriptor_set_layouts[i], VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT));
 	}
 
-	vkDestroyPipelineLayout(vk_device, shader_info->vk_pipeline_layout, nullptr);
+	vkDestroyPipelineLayout(vk_device, shader_info->vk_pipeline_layout, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_PIPELINE_LAYOUT));
 
 	for (uint32_t i = 0; i < shader_info->vk_stages_create_info.size(); i++) {
-		vkDestroyShaderModule(vk_device, shader_info->vk_stages_create_info[i].module, nullptr);
+		vkDestroyShaderModule(vk_device, shader_info->vk_stages_create_info[i].module, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_SHADER_MODULE));
 	}
+	// <TF>
+	// @ShadyTF unload shader modules
+	// Was :
+	//for (uint32_t i = 0; i < si.vk_stages_create_info.size(); i++) {
+	//	if (si.vk_stages_create_info[i].module) {
+	//		vkDestroyShaderModule(vk_device, si.vk_stages_create_info[i].module, nullptr);
+	//	}
+	//}
+	shader_destroy_modules( p_shader );
+	// </TF>
 
 	VersatileResource::free(resources_allocator, shader_info);
 }
 
+// <TF>
+// @ShadyTF unload shader modules
+
+
+void RenderingDeviceDriverVulkan::shader_destroy_modules(ShaderID p_shader) {
+	auto *E = (RBSet<ShaderInfo>::Element *)p_shader.id;
+	ShaderInfo &si = E->get();
+
+	for (uint32_t i = 0; i < si.vk_stages_create_info.size(); i++) {
+		if (si.vk_stages_create_info[i].module) {
+			vkDestroyShaderModule(vk_device, si.vk_stages_create_info[i].module, nullptr);
+			si.vk_stages_create_info[i].module = VK_NULL_HANDLE;
+		}
+	}
+	si.vk_stages_create_info.clear();
+}
+
+// </TF>
+
+
+
 /*********************/
 /**** UNIFORM SET ****/
 /*********************/
-
-VkDescriptorPool RenderingDeviceDriverVulkan::_descriptor_set_pool_find_or_create(const DescriptorSetPoolKey &p_key, DescriptorSetPools::Iterator *r_pool_sets_it) {
-	DescriptorSetPools::Iterator pool_sets_it = descriptor_set_pools.find(p_key);
+// <TF>
+// @ShadyTF :
+// descriptor optimizations : linear allocation of descriptor set pools
+// Was:
+// VkDescriptorPool RenderingDeviceDriverVulkan::_descriptor_set_pool_find_or_create(const DescriptorSetPoolKey &p_key, DescriptorSetPools::Iterator *r_pool_sets_it) {
+// DescriptorSetPools::Iterator pool_sets_it = descriptor_set_pools.find(p_key);
+VkDescriptorPool RenderingDeviceDriverVulkan::_descriptor_set_pool_find_or_create(const DescriptorSetPoolKey &p_key, DescriptorSetPools::Iterator *r_pool_sets_it, int p_linear_pool_index) {
+	bool linear_pool = p_linear_pool_index >= 0;
+	DescriptorSetPools::Iterator pool_sets_it = linear_pool ? linear_descriptor_set_pools[p_linear_pool_index].find(p_key) : descriptor_set_pools.find(p_key);
+	// </TF>
 
 	if (pool_sets_it) {
 		for (KeyValue<VkDescriptorPool, uint32_t> &E : pool_sets_it->value) {
@@ -3395,6 +3818,17 @@ VkDescriptorPool RenderingDeviceDriverVulkan::_descriptor_set_pool_find_or_creat
 			curr_vk_size++;
 			vk_sizes_count++;
 		}
+// <TF>
+// @ShadyTF 
+// Dynamic uniform buffer 
+		if (p_key.uniform_type[UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC]) {
+			*curr_vk_size = {};
+			curr_vk_size->type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+			curr_vk_size->descriptorCount = p_key.uniform_type[UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC] * max_descriptor_sets_per_pool;
+			curr_vk_size++;
+			vk_sizes_count++;
+		}
+// </TF>
 		if (p_key.uniform_type[UNIFORM_TYPE_STORAGE_BUFFER]) {
 			*curr_vk_size = {};
 			curr_vk_size->type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -3414,13 +3848,23 @@ VkDescriptorPool RenderingDeviceDriverVulkan::_descriptor_set_pool_find_or_creat
 
 	VkDescriptorPoolCreateInfo descriptor_set_pool_create_info = {};
 	descriptor_set_pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-	descriptor_set_pool_create_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT; // Can't think how somebody may NOT need this flag.
+	// <TF>
+	// @ShadyTF :
+	// descriptor optimizations : linear allocation of descriptor set pools
+	// Was :
+	// descriptor_set_pool_create_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT; // Can't think how somebody may NOT need this flag.
+	if (linear_descriptor_pools_enabled && linear_pool) {
+		descriptor_set_pool_create_info.flags = 0;
+	} else {
+		descriptor_set_pool_create_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT; // Can't think how somebody may NOT need this flag.
+	}
+	// </TF>
 	descriptor_set_pool_create_info.maxSets = max_descriptor_sets_per_pool;
 	descriptor_set_pool_create_info.poolSizeCount = vk_sizes_count;
 	descriptor_set_pool_create_info.pPoolSizes = vk_sizes;
 
 	VkDescriptorPool vk_pool = VK_NULL_HANDLE;
-	VkResult res = vkCreateDescriptorPool(vk_device, &descriptor_set_pool_create_info, nullptr, &vk_pool);
+	VkResult res = vkCreateDescriptorPool(vk_device, &descriptor_set_pool_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DESCRIPTOR_POOL), &vk_pool);
 	if (res) {
 		ERR_FAIL_COND_V_MSG(res, VK_NULL_HANDLE, "vkCreateDescriptorPool failed with error " + itos(res) + ".");
 	}
@@ -3428,7 +3872,17 @@ VkDescriptorPool RenderingDeviceDriverVulkan::_descriptor_set_pool_find_or_creat
 	// Bookkeep.
 
 	if (!pool_sets_it) {
-		pool_sets_it = descriptor_set_pools.insert(p_key, HashMap<VkDescriptorPool, uint32_t>());
+// <TF>
+// @ShadyTF :
+// descriptor optimizations : linear allocation of descriptor set pools
+// Was:
+// pool_sets_it = descriptor_set_pools.insert(p_key, HashMap<VkDescriptorPool, uint32_t>());
+		if (linear_pool) {
+			pool_sets_it = linear_descriptor_set_pools[p_linear_pool_index].insert(p_key, HashMap<VkDescriptorPool, uint32_t>());
+		} else {
+			pool_sets_it = descriptor_set_pools.insert(p_key, HashMap<VkDescriptorPool, uint32_t>());
+		}
+// </TF>
 	}
 	HashMap<VkDescriptorPool, uint32_t> &pool_rcs = pool_sets_it->value;
 	pool_rcs.insert(vk_pool, 0);
@@ -3436,34 +3890,73 @@ VkDescriptorPool RenderingDeviceDriverVulkan::_descriptor_set_pool_find_or_creat
 	return vk_pool;
 }
 
-void RenderingDeviceDriverVulkan::_descriptor_set_pool_unreference(DescriptorSetPools::Iterator p_pool_sets_it, VkDescriptorPool p_vk_descriptor_pool) {
+// <TF>
+// @ShadyTF :
+// descriptor optimizations : linear allocation of descriptor set pools
+// Was :
+//void RenderingDeviceDriverVulkan::_descriptor_set_pool_unreference(DescriptorSetPools::Iterator p_pool_sets_it, VkDescriptorPool p_vk_descriptor_pool) {
+void RenderingDeviceDriverVulkan::_descriptor_set_pool_unreference(DescriptorSetPools::Iterator p_pool_sets_it, VkDescriptorPool p_vk_descriptor_pool, int p_linear_pool_index) {
+// </TF>
 	HashMap<VkDescriptorPool, uint32_t>::Iterator pool_rcs_it = p_pool_sets_it->value.find(p_vk_descriptor_pool);
 	pool_rcs_it->value--;
 	if (pool_rcs_it->value == 0) {
-		vkDestroyDescriptorPool(vk_device, p_vk_descriptor_pool, nullptr);
+		vkDestroyDescriptorPool(vk_device, p_vk_descriptor_pool, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DESCRIPTOR_POOL));
 		p_pool_sets_it->value.erase(p_vk_descriptor_pool);
 		if (p_pool_sets_it->value.is_empty()) {
-			descriptor_set_pools.remove(p_pool_sets_it);
+			// <TF>
+			// @ShadyTF :
+			// descriptor optimizations : linear allocation of descriptor set pools
+			// Was:		descriptor_set_pools.remove(p_pool_sets_it);
+			if (linear_descriptor_pools_enabled && p_linear_pool_index >= 0) {
+				linear_descriptor_set_pools[p_linear_pool_index].remove(p_pool_sets_it);
+			} else {
+				descriptor_set_pools.remove(p_pool_sets_it);
+			}
 		}
 	}
 }
 
-RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index) {
+// <TF>
+// @ShadyTF :
+// descriptor optimizations : linear allocation of descriptor set pools
+// Was:
+//RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index) {
+RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index, int p_linear_pool_index) {
+	if (!linear_descriptor_pools_enabled) {
+		p_linear_pool_index = -1;
+	}
+// </TF>
 	DescriptorSetPoolKey pool_key;
+// <TF>
+// @ShadyTF :
+// immutable samplers :
+// as immutable samplers will be skipped we need to track the number of vk_writes used
+// Was :
+//	VkWriteDescriptorSet *vk_writes = ALLOCA_ARRAY(VkWriteDescriptorSet, p_uniforms.size());
+//	for (uint32_t i = 0; i < p_uniforms.size(); i++) {
+//		const BoundUniform &uniform = p_uniforms[i];
 
 	VkWriteDescriptorSet *vk_writes = ALLOCA_ARRAY(VkWriteDescriptorSet, p_uniforms.size());
+	uint32_t writes_amount = 0;
 	for (uint32_t i = 0; i < p_uniforms.size(); i++) {
 		const BoundUniform &uniform = p_uniforms[i];
 
-		vk_writes[i] = {};
-		vk_writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		vk_writes[i].dstBinding = uniform.binding;
-		vk_writes[i].descriptorType = VK_DESCRIPTOR_TYPE_MAX_ENUM; // Invalid value.
+// </TF>
+		vk_writes[writes_amount] = {};
+		vk_writes[writes_amount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 
 		uint32_t num_descriptors = 1;
 
 		switch (uniform.type) {
 			case UNIFORM_TYPE_SAMPLER: {
+// <TF>
+// @ShadyTF :
+// immutable samplers :
+// skipping immutable samplers.
+				if (uniform.immutable_sampler && immutable_samplers_enabled) {
+					continue;
+				}
+// <TF>
 				num_descriptors = uniform.ids.size();
 				VkDescriptorImageInfo *vk_img_infos = ALLOCA_ARRAY(VkDescriptorImageInfo, num_descriptors);
 
@@ -3474,8 +3967,8 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 					vk_img_infos[j].imageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 				}
 
-				vk_writes[i].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-				vk_writes[i].pImageInfo = vk_img_infos;
+				vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+				vk_writes[writes_amount].pImageInfo = vk_img_infos;
 			} break;
 			case UNIFORM_TYPE_SAMPLER_WITH_TEXTURE: {
 				num_descriptors = uniform.ids.size() / 2;
@@ -3488,8 +3981,8 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 					vk_img_infos[j].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 				}
 
-				vk_writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				vk_writes[i].pImageInfo = vk_img_infos;
+				vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+				vk_writes[writes_amount].pImageInfo = vk_img_infos;
 			} break;
 			case UNIFORM_TYPE_TEXTURE: {
 				num_descriptors = uniform.ids.size();
@@ -3501,8 +3994,8 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 					vk_img_infos[j].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 				}
 
-				vk_writes[i].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-				vk_writes[i].pImageInfo = vk_img_infos;
+				vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+				vk_writes[writes_amount].pImageInfo = vk_img_infos;
 			} break;
 			case UNIFORM_TYPE_IMAGE: {
 				num_descriptors = uniform.ids.size();
@@ -3514,8 +4007,8 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 					vk_img_infos[j].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 				}
 
-				vk_writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-				vk_writes[i].pImageInfo = vk_img_infos;
+				vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+				vk_writes[writes_amount].pImageInfo = vk_img_infos;
 			} break;
 			case UNIFORM_TYPE_TEXTURE_BUFFER: {
 				num_descriptors = uniform.ids.size();
@@ -3531,9 +4024,9 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 					vk_buf_views[j] = buf_info->vk_view;
 				}
 
-				vk_writes[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
-				vk_writes[i].pBufferInfo = vk_buf_infos;
-				vk_writes[i].pTexelBufferView = vk_buf_views;
+				vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+				vk_writes[writes_amount].pBufferInfo = vk_buf_infos;
+				vk_writes[writes_amount].pTexelBufferView = vk_buf_views;
 			} break;
 			case UNIFORM_TYPE_SAMPLER_WITH_TEXTURE_BUFFER: {
 				num_descriptors = uniform.ids.size() / 2;
@@ -3553,10 +4046,10 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 					vk_buf_views[j] = buf_info->vk_view;
 				}
 
-				vk_writes[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
-				vk_writes[i].pImageInfo = vk_img_infos;
-				vk_writes[i].pBufferInfo = vk_buf_infos;
-				vk_writes[i].pTexelBufferView = vk_buf_views;
+				vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+				vk_writes[writes_amount].pImageInfo = vk_img_infos;
+				vk_writes[writes_amount].pBufferInfo = vk_buf_infos;
+				vk_writes[writes_amount].pTexelBufferView = vk_buf_views;
 			} break;
 			case UNIFORM_TYPE_IMAGE_BUFFER: {
 				CRASH_NOW_MSG("Unimplemented!"); // TODO.
@@ -3568,9 +4061,23 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 				vk_buf_info->buffer = buf_info->vk_buffer;
 				vk_buf_info->range = buf_info->size;
 
-				vk_writes[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-				vk_writes[i].pBufferInfo = vk_buf_info;
+				vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+				vk_writes[writes_amount].pBufferInfo = vk_buf_info;
 			} break;
+// <TF>
+// @ShadyTF 
+// Dynamic uniform buffer 
+			case UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC: {
+				const BufferInfo *buf_info = (const BufferInfo *)uniform.ids[0].id;
+				VkDescriptorBufferInfo *vk_buf_info = ALLOCA_SINGLE(VkDescriptorBufferInfo);
+				*vk_buf_info = {};
+				vk_buf_info->buffer = buf_info->vk_buffer;
+				vk_buf_info->range = buf_info->size;
+
+				vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+				vk_writes[writes_amount].pBufferInfo = vk_buf_info;
+			} break;
+// </TF>
 			case UNIFORM_TYPE_STORAGE_BUFFER: {
 				const BufferInfo *buf_info = (const BufferInfo *)uniform.ids[0].id;
 				VkDescriptorBufferInfo *vk_buf_info = ALLOCA_SINGLE(VkDescriptorBufferInfo);
@@ -3578,8 +4085,8 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 				vk_buf_info->buffer = buf_info->vk_buffer;
 				vk_buf_info->range = buf_info->size;
 
-				vk_writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-				vk_writes[i].pBufferInfo = vk_buf_info;
+				vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+				vk_writes[writes_amount].pBufferInfo = vk_buf_info;
 			} break;
 			case UNIFORM_TYPE_INPUT_ATTACHMENT: {
 				num_descriptors = uniform.ids.size();
@@ -3591,24 +4098,32 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 					vk_img_infos[j].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 				}
 
-				vk_writes[i].descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
-				vk_writes[i].pImageInfo = vk_img_infos;
+				vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+				vk_writes[writes_amount].pImageInfo = vk_img_infos;
 			} break;
 			default: {
 				DEV_ASSERT(false);
 			}
 		}
 
-		vk_writes[i].descriptorCount = num_descriptors;
+		vk_writes[writes_amount].dstBinding = uniform.binding;
+		vk_writes[writes_amount].descriptorCount = num_descriptors;
 
 		ERR_FAIL_COND_V_MSG(pool_key.uniform_type[uniform.type] == MAX_UNIFORM_POOL_ELEMENT, UniformSetID(),
 				"Uniform set reached the limit of bindings for the same type (" + itos(MAX_UNIFORM_POOL_ELEMENT) + ").");
 		pool_key.uniform_type[uniform.type] += num_descriptors;
+		writes_amount++;
 	}
 
 	// Need a descriptor pool.
 	DescriptorSetPools::Iterator pool_sets_it = {};
-	VkDescriptorPool vk_pool = _descriptor_set_pool_find_or_create(pool_key, &pool_sets_it);
+	// <TF>
+	// @ShadyTF :
+	// descriptor optimizations : linear allocation of descriptor set pools
+	// Was:
+	// VkDescriptorPool vk_pool = _descriptor_set_pool_find_or_create(pool_key, &pool_sets_it);
+	VkDescriptorPool vk_pool = _descriptor_set_pool_find_or_create(pool_key, &pool_sets_it, p_linear_pool_index);
+	// </TF>
 	DEV_ASSERT(vk_pool);
 	pool_sets_it->value[vk_pool]++;
 
@@ -3620,22 +4135,51 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 	descriptor_set_allocate_info.pSetLayouts = &shader_info->vk_descriptor_set_layouts[p_set_index];
 
 	VkDescriptorSet vk_descriptor_set = VK_NULL_HANDLE;
+
 	VkResult res = vkAllocateDescriptorSets(vk_device, &descriptor_set_allocate_info, &vk_descriptor_set);
 	if (res) {
-		_descriptor_set_pool_unreference(pool_sets_it, vk_pool);
+	// <TF>
+	// @ShadyTF :
+	// descriptor optimizations : linear allocation of descriptor set pools
+	// Was:
+	// _descriptor_set_pool_unreference(pool_sets_it, vk_pool);
+		_descriptor_set_pool_unreference(pool_sets_it, vk_pool, p_linear_pool_index);
+	// </TF>
 		ERR_FAIL_V_MSG(UniformSetID(), "Cannot allocate descriptor sets, error " + itos(res) + ".");
 	}
 
-	for (uint32_t i = 0; i < p_uniforms.size(); i++) {
+// <TF>
+// @ShadyTF :
+// immutable samplers :
+// using number of vk_writes after skipping ummutable samplers
+// Was:
+//	for (uint32_t i = 0; i < p_uniforms.size(); i++) {
+//		vk_writes[i].dstSet = vk_descriptor_set;
+//	}
+//	vkUpdateDescriptorSets(vk_device, p_uniforms.size(), vk_writes, 0, nullptr);
+
+	for (uint32_t i = 0; i <  writes_amount; i++) {
 		vk_writes[i].dstSet = vk_descriptor_set;
 	}
-	vkUpdateDescriptorSets(vk_device, p_uniforms.size(), vk_writes, 0, nullptr);
+	vkUpdateDescriptorSets(vk_device, writes_amount, vk_writes, 0, nullptr);
+	// </TF>
 
 	// Bookkeep.
 
 	UniformSetInfo *usi = VersatileResource::allocate<UniformSetInfo>(resources_allocator);
 	usi->vk_descriptor_set = vk_descriptor_set;
-	usi->vk_descriptor_pool = vk_pool;
+	// <TF>
+	// @ShadyTF :
+	// descriptor optimizations : linear allocation of descriptor set pools
+	// Was:
+	// usi->vk_descriptor_pool = vk_pool;
+	if (p_linear_pool_index >= 0) {
+		usi->vk_linear_descriptor_pool = vk_pool;
+	} else {
+ 		usi->vk_descriptor_pool = vk_pool;
+	}
+	// </TF>
+	
 	usi->pool_sets_it = pool_sets_it;
 
 	return UniformSetID(usi);
@@ -3643,11 +4187,41 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 
 void RenderingDeviceDriverVulkan::uniform_set_free(UniformSetID p_uniform_set) {
 	UniformSetInfo *usi = (UniformSetInfo *)p_uniform_set.id;
-	vkFreeDescriptorSets(vk_device, usi->vk_descriptor_pool, 1, &usi->vk_descriptor_set);
 
-	_descriptor_set_pool_unreference(usi->pool_sets_it, usi->vk_descriptor_pool);
+	// <TF>
+	// @ShadyTF :
+	// descriptor optimizations : linear allocation of descriptor set pools
+	// Was :
+	// vkFreeDescriptorSets(vk_device, usi->vk_descriptor_pool, 1, &usi->vk_descriptor_set);
+	// _descriptor_set_pool_unreference(usi->pool_sets_it, usi->vk_descriptor_pool);
+	if (usi->vk_linear_descriptor_pool) {
+	} else {
+		vkFreeDescriptorSets(vk_device, usi->vk_descriptor_pool, 1, &usi->vk_descriptor_set);
+		_descriptor_set_pool_unreference(usi->pool_sets_it, usi->vk_descriptor_pool, -1);
+	}
+	// </TF>
+	
+
+	
 
 	VersatileResource::free(resources_allocator, usi);
+}
+
+void RenderingDeviceDriverVulkan::linear_uniform_set_pools_reset(int p_linear_pool_index) {
+	if (linear_descriptor_pools_enabled) {
+		DescriptorSetPools& pools_to_reset = linear_descriptor_set_pools[p_linear_pool_index];
+		DescriptorSetPools::Iterator curr_pool = pools_to_reset.begin();
+
+		while (curr_pool != pools_to_reset.end()) {
+			HashMap<VkDescriptorPool, uint32_t>::Iterator curr_pair = curr_pool->value.begin();
+			while (curr_pair != curr_pool->value.end()) {
+				vkResetDescriptorPool(vk_device, curr_pair->key, 0);
+				curr_pair->value = 0;
+				++curr_pair;
+			}
+			++curr_pool;
+		}
+	}
 }
 
 // ----- COMMANDS -----
@@ -3785,7 +4359,7 @@ void RenderingDeviceDriverVulkan::command_copy_texture_to_buffer(CommandBufferID
 /******************/
 
 void RenderingDeviceDriverVulkan::pipeline_free(PipelineID p_pipeline) {
-	vkDestroyPipeline(vk_device, (VkPipeline)p_pipeline.id, nullptr);
+	vkDestroyPipeline(vk_device, (VkPipeline)p_pipeline.id, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_PIPELINE));
 }
 
 // ----- BINDING -----
@@ -3850,7 +4424,7 @@ bool RenderingDeviceDriverVulkan::pipeline_cache_create(const Vector<uint8_t> &p
 			cache_info.flags = VK_PIPELINE_CACHE_CREATE_EXTERNALLY_SYNCHRONIZED_BIT;
 		}
 
-		VkResult err = vkCreatePipelineCache(vk_device, &cache_info, nullptr, &pipelines_cache.vk_cache);
+		VkResult err = vkCreatePipelineCache(vk_device, &cache_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_PIPELINE_CACHE), &pipelines_cache.vk_cache);
 		if (err != VK_SUCCESS) {
 			WARN_PRINT("vkCreatePipelinecache failed with error " + itos(err) + ".");
 			return false;
@@ -3863,7 +4437,7 @@ bool RenderingDeviceDriverVulkan::pipeline_cache_create(const Vector<uint8_t> &p
 void RenderingDeviceDriverVulkan::pipeline_cache_free() {
 	DEV_ASSERT(pipelines_cache.vk_cache);
 
-	vkDestroyPipelineCache(vk_device, pipelines_cache.vk_cache, nullptr);
+	vkDestroyPipelineCache(vk_device, pipelines_cache.vk_cache, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_PIPELINE_CACHE));
 	pipelines_cache.vk_cache = VK_NULL_HANDLE;
 
 	DEV_ASSERT(caching_instance_count > 0);
@@ -4047,14 +4621,14 @@ RDD::RenderPassID RenderingDeviceDriverVulkan::render_pass_create(VectorView<Att
 	}
 
 	VkRenderPass vk_render_pass = VK_NULL_HANDLE;
-	VkResult res = _create_render_pass(vk_device, &create_info, nullptr, &vk_render_pass);
+	VkResult res = _create_render_pass(vk_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_RENDER_PASS), &vk_render_pass);
 	ERR_FAIL_COND_V_MSG(res, RenderPassID(), "vkCreateRenderPass2KHR failed with error " + itos(res) + ".");
 
 	return RenderPassID(vk_render_pass);
 }
 
 void RenderingDeviceDriverVulkan::render_pass_free(RenderPassID p_render_pass) {
-	vkDestroyRenderPass(vk_device, (VkRenderPass)p_render_pass.id, nullptr);
+	vkDestroyRenderPass(vk_device, (VkRenderPass)p_render_pass.id, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_RENDER_PASS));
 }
 
 // ----- COMMANDS -----
@@ -4146,6 +4720,34 @@ void RenderingDeviceDriverVulkan::command_bind_render_uniform_set(CommandBufferI
 	const UniformSetInfo *usi = (const UniformSetInfo *)p_uniform_set.id;
 	vkCmdBindDescriptorSets((VkCommandBuffer)p_cmd_buffer.id, VK_PIPELINE_BIND_POINT_GRAPHICS, shader_info->vk_pipeline_layout, p_set_index, 1, &usi->vk_descriptor_set, 0, nullptr);
 }
+
+
+void RenderingDeviceDriverVulkan::command_bind_render_uniform_sets(CommandBufferID p_cmd_buffer, VectorView<UniformSetID> p_uniform_sets, ShaderID p_shader, uint32_t p_first_set_index, uint32_t p_set_count) {
+	if (p_set_count == 0) {
+		return;
+	}
+
+	const ShaderInfo *shader_info = (const ShaderInfo *)p_shader.id;
+	VkDescriptorSet *sets = (VkDescriptorSet *)alloca(sizeof(VkDescriptorSet) * p_set_count);
+
+	for (uint32_t i = 0; i < p_set_count; i++) {
+		sets[i] = ((const UniformSetInfo *)p_uniform_sets[i].id)->vk_descriptor_set;
+	}
+
+	vkCmdBindDescriptorSets((VkCommandBuffer)p_cmd_buffer.id, VK_PIPELINE_BIND_POINT_GRAPHICS, shader_info->vk_pipeline_layout, p_first_set_index, p_set_count, &sets[0], 0, nullptr);
+}
+
+
+// <TF>
+// @ShadyTF 
+// Dynamic uniform buffer 
+void RenderingDeviceDriverVulkan::command_bind_render_uniform_set_dynamic(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index, uint32_t p_offsets_count, const uint32_t* p_offsets) {
+	const ShaderInfo *shader_info = (const ShaderInfo *)p_shader.id;
+	const UniformSetInfo *usi = (const UniformSetInfo *)p_uniform_set.id;
+	vkCmdBindDescriptorSets((VkCommandBuffer)p_cmd_buffer.id, VK_PIPELINE_BIND_POINT_GRAPHICS, shader_info->vk_pipeline_layout, p_set_index, 1, &usi->vk_descriptor_set, p_offsets_count, p_offsets);
+}
+// </TF>
+
 
 void RenderingDeviceDriverVulkan::command_render_draw(CommandBufferID p_cmd_buffer, uint32_t p_vertex_count, uint32_t p_instance_count, uint32_t p_base_vertex, uint32_t p_first_instance) {
 	vkCmdDraw((VkCommandBuffer)p_cmd_buffer.id, p_vertex_count, p_instance_count, p_base_vertex, p_first_instance);
@@ -4496,6 +5098,10 @@ RDD::PipelineID RenderingDeviceDriverVulkan::render_pipeline_create(
 	pipeline_create_info.pNext = graphics_pipeline_nextptr;
 	pipeline_create_info.stageCount = shader_info->vk_stages_create_info.size();
 
+	// <TF>
+	// @ShadyTF unload shader modules
+	ERR_FAIL_COND_V_MSG(pipeline_create_info.stageCount == 0, PipelineID(), "Cannot create pipeline without shader module, please make sure shader modules are destroyed only after all associated pipelines are created");
+	// </TF>
 	VkPipelineShaderStageCreateInfo *vk_pipeline_stages = ALLOCA_ARRAY(VkPipelineShaderStageCreateInfo, shader_info->vk_stages_create_info.size());
 
 	for (uint32_t i = 0; i < shader_info->vk_stages_create_info.size(); i++) {
@@ -4538,7 +5144,7 @@ RDD::PipelineID RenderingDeviceDriverVulkan::render_pipeline_create(
 	// ---
 
 	VkPipeline vk_pipeline = VK_NULL_HANDLE;
-	VkResult err = vkCreateGraphicsPipelines(vk_device, pipelines_cache.vk_cache, 1, &pipeline_create_info, nullptr, &vk_pipeline);
+	VkResult err = vkCreateGraphicsPipelines(vk_device, pipelines_cache.vk_cache, 1, &pipeline_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_PIPELINE), &vk_pipeline);
 	ERR_FAIL_COND_V_MSG(err, PipelineID(), "vkCreateGraphicsPipelines failed with error " + itos(err) + ".");
 
 	return PipelineID(vk_pipeline);
@@ -4558,6 +5164,21 @@ void RenderingDeviceDriverVulkan::command_bind_compute_uniform_set(CommandBuffer
 	const ShaderInfo *shader_info = (const ShaderInfo *)p_shader.id;
 	const UniformSetInfo *usi = (const UniformSetInfo *)p_uniform_set.id;
 	vkCmdBindDescriptorSets((VkCommandBuffer)p_cmd_buffer.id, VK_PIPELINE_BIND_POINT_COMPUTE, shader_info->vk_pipeline_layout, p_set_index, 1, &usi->vk_descriptor_set, 0, nullptr);
+}
+
+void RenderingDeviceDriverVulkan::command_bind_compute_uniform_sets(CommandBufferID p_cmd_buffer, VectorView<UniformSetID> p_uniform_sets, ShaderID p_shader, uint32_t p_first_set_index, uint32_t p_set_count) {
+	if (p_set_count == 0) {
+		return;
+	}
+
+	const ShaderInfo *shader_info = (const ShaderInfo *)p_shader.id;
+	VkDescriptorSet *sets = (VkDescriptorSet *)alloca(sizeof(VkDescriptorSet) * p_set_count);
+
+	for (uint32_t i = 0; i < p_set_count; i++) {
+		sets[i] = ((const UniformSetInfo *)p_uniform_sets[i].id)->vk_descriptor_set;
+	}
+
+	vkCmdBindDescriptorSets((VkCommandBuffer)p_cmd_buffer.id, VK_PIPELINE_BIND_POINT_COMPUTE, shader_info->vk_pipeline_layout, p_first_set_index, p_set_count, &sets[0], 0, nullptr);
 }
 
 void RenderingDeviceDriverVulkan::command_compute_dispatch(CommandBufferID p_cmd_buffer, uint32_t p_x_groups, uint32_t p_y_groups, uint32_t p_z_groups) {
@@ -4599,7 +5220,7 @@ RDD::PipelineID RenderingDeviceDriverVulkan::compute_pipeline_create(ShaderID p_
 	}
 
 	VkPipeline vk_pipeline = VK_NULL_HANDLE;
-	VkResult err = vkCreateComputePipelines(vk_device, pipelines_cache.vk_cache, 1, &pipeline_create_info, nullptr, &vk_pipeline);
+	VkResult err = vkCreateComputePipelines(vk_device, pipelines_cache.vk_cache, 1, &pipeline_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_PIPELINE), &vk_pipeline);
 	ERR_FAIL_COND_V_MSG(err, PipelineID(), "vkCreateComputePipelines failed with error " + itos(err) + ".");
 
 	return PipelineID(vk_pipeline);
@@ -4618,12 +5239,12 @@ RDD::QueryPoolID RenderingDeviceDriverVulkan::timestamp_query_pool_create(uint32
 	query_pool_create_info.queryCount = p_query_count;
 
 	VkQueryPool vk_query_pool = VK_NULL_HANDLE;
-	vkCreateQueryPool(vk_device, &query_pool_create_info, nullptr, &vk_query_pool);
+	vkCreateQueryPool(vk_device, &query_pool_create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_QUERY_POOL), &vk_query_pool);
 	return RDD::QueryPoolID(vk_query_pool);
 }
 
 void RenderingDeviceDriverVulkan::timestamp_query_pool_free(QueryPoolID p_pool_id) {
-	vkDestroyQueryPool(vk_device, (VkQueryPool)p_pool_id.id, nullptr);
+	vkDestroyQueryPool(vk_device, (VkQueryPool)p_pool_id.id, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_QUERY_POOL));
 }
 
 void RenderingDeviceDriverVulkan::timestamp_query_pool_get_results(QueryPoolID p_pool_id, uint32_t p_query_count, uint64_t *r_results) {
@@ -4678,6 +5299,23 @@ void RenderingDeviceDriverVulkan::command_timestamp_write(CommandBufferID p_cmd_
 
 void RenderingDeviceDriverVulkan::command_begin_label(CommandBufferID p_cmd_buffer, const char *p_label_name, const Color &p_color) {
 	const RenderingContextDriverVulkan::Functions &functions = context_driver->functions_get();
+	// <TF>
+	// @ShadyTF debug marker extensions
+	if (!functions.CmdBeginDebugUtilsLabelEXT) {
+		if (functions.vkCmdDebugMarkerBeginEXT) {
+			VkDebugMarkerMarkerInfoEXT marker;
+			marker.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+			marker.pNext = nullptr;
+			marker.pMarkerName = p_label_name;
+			marker.color[0] = p_color[0];
+			marker.color[1] = p_color[1];
+			marker.color[2] = p_color[2];
+			marker.color[3] = p_color[3];
+			functions.vkCmdDebugMarkerBeginEXT((VkCommandBuffer)p_cmd_buffer.id, &marker);
+		}
+		return;
+	}
+	// </TF>
 	VkDebugUtilsLabelEXT label;
 	label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
 	label.pNext = nullptr;
@@ -4691,7 +5329,132 @@ void RenderingDeviceDriverVulkan::command_begin_label(CommandBufferID p_cmd_buff
 
 void RenderingDeviceDriverVulkan::command_end_label(CommandBufferID p_cmd_buffer) {
 	const RenderingContextDriverVulkan::Functions &functions = context_driver->functions_get();
+	// <TF>
+	// @ShadyTF debug marker extensions
+	if (!functions.CmdEndDebugUtilsLabelEXT) {
+		if (functions.vkCmdDebugMarkerEndEXT) {
+			functions.vkCmdDebugMarkerEndEXT((VkCommandBuffer)p_cmd_buffer.id);
+		}
+		return;
+	}
+	// </TF>
 	functions.CmdEndDebugUtilsLabelEXT((VkCommandBuffer)p_cmd_buffer.id);
+}
+
+/****************/
+/**** DEBUG *****/
+/****************/
+void RenderingDeviceDriverVulkan::command_insert_breadcrumb(CommandBufferID p_cmd_buffer, uint32_t p_data) {
+	if (p_data == BreadcrumbMarker::NONE)
+		return;
+	vkCmdFillBuffer((VkCommandBuffer)p_cmd_buffer.id, ((BufferInfo*)breadcrumb_buffer.id)->vk_buffer, 0, sizeof(uint32_t), p_data);
+}
+
+void RenderingDeviceDriverVulkan::on_device_lost() const {
+	VkDeviceFaultCountsEXT fault_counts = { };
+	fault_counts.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT;
+	VkResult vkres = vkGetDeviceFaultInfoEXT(vk_device, &fault_counts, nullptr);
+
+	if (vkres != VK_SUCCESS) {
+		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "vkGetDeviceFaultInfoEXT returned " + itos(vkres) + " when getting fault count, skipping VK_EXT_device_fault report...");
+		return;
+	}
+
+	String err_msg = "";
+	VkDeviceFaultInfoEXT fault_info = { };
+	fault_info.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT;
+	fault_info.pVendorInfos = fault_counts.vendorInfoCount
+			? (VkDeviceFaultVendorInfoEXT *)memalloc(fault_counts.vendorInfoCount * sizeof(VkDeviceFaultVendorInfoEXT))
+			: NULL;
+	fault_info.pAddressInfos =
+			fault_counts.addressInfoCount
+			? (VkDeviceFaultAddressInfoEXT *)memalloc(fault_counts.addressInfoCount * sizeof(VkDeviceFaultAddressInfoEXT))
+			: NULL;
+	fault_counts.vendorBinarySize = 0;
+	vkres = vkGetDeviceFaultInfoEXT(vk_device, &fault_counts, &fault_info);
+	if (vkres != VK_SUCCESS) {
+		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "vkGetDeviceFaultInfoEXT returned " + itos(vkres) + " when getting fault info, skipping VK_EXT_device_fault report...");
+	} else {
+		err_msg += "** Report from VK_EXT_device_fault **\n";
+		err_msg += "Description: " + String(fault_info.description) + "\n";
+		err_msg += "Vendor infos\n";
+		for (uint32_t vd = 0; vd < fault_counts.vendorInfoCount; ++vd) {
+			const VkDeviceFaultVendorInfoEXT *vendor_info = &fault_info.pVendorInfos[vd];
+			err_msg += "Info " + itos(vd) + "\n";
+			err_msg += "   Description: " + String(vendor_info->description) + "\n";
+			err_msg += "   Fault code : " + itos(vendor_info->vendorFaultCode) + "\n";
+			err_msg += "   Fault data : " + itos(vendor_info->vendorFaultData) + "\n";
+		}
+
+		static constexpr const char *addressTypeNames[] = {
+			"NONE",
+			"READ_INVALID",
+			"WRITE_INVALID",
+			"EXECUTE_INVALID",
+			"INSTRUCTION_POINTER_UNKNOWN",
+			"INSTRUCTION_POINTER_INVALID",
+			"INSTRUCTION_POINTER_FAULT",
+		};
+		err_msg += "Address infosn\n";
+		for (uint32_t ad = 0; ad < fault_counts.addressInfoCount; ++ad) {
+			const VkDeviceFaultAddressInfoEXT *addr_info = &fault_info.pAddressInfos[ad];
+			// From https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VkDeviceFaultAddressInfoEXT.html
+			const VkDeviceAddress lower = (addr_info->reportedAddress & ~(addr_info->addressPrecision - 1));
+			const VkDeviceAddress upper = (addr_info->reportedAddress | (addr_info->addressPrecision - 1));
+			err_msg += "Info " + itos(ad);
+			err_msg += "   Type            : " + String(addressTypeNames[addr_info->addressType]);
+			err_msg += "   Reported address: " + itos(addr_info->reportedAddress);
+			err_msg += "   Lower address   : " + itos(lower);
+			err_msg += "   Upper address   : " + itos(upper);
+			err_msg += "   Precision       : " + itos(addr_info->addressPrecision);
+		}
+	}
+
+	_err_print_error(FUNCTION_STR, __FILE__, __LINE__, err_msg);
+
+	if (fault_info.pVendorInfos)
+		memfree(fault_info.pVendorInfos);
+	if (fault_info.pAddressInfos)
+		memfree(fault_info.pAddressInfos);
+}
+
+void RenderingDeviceDriverVulkan::print_lost_device_info() {
+
+#if defined(DEBUG_ENABLED) || defined(DEV_ENABLED)
+	void *breadcrumb_ptr;
+	vmaFlushAllocation(allocator, ((BufferInfo *)breadcrumb_buffer.id)->allocation.handle, 0, sizeof(uint32_t));
+	vmaInvalidateAllocation(allocator, ((BufferInfo *)breadcrumb_buffer.id)->allocation.handle, 0, sizeof(uint32_t));
+
+	vmaMapMemory(allocator, ((BufferInfo *)breadcrumb_buffer.id)->allocation.handle, &breadcrumb_ptr);
+	uint32_t last_breadcrumb = *(uint32_t*)breadcrumb_ptr;
+	vmaUnmapMemory(allocator, ((BufferInfo *)breadcrumb_buffer.id)->allocation.handle);
+	uint32_t phase = last_breadcrumb >> 16;
+	uint32_t user_data = last_breadcrumb & ((1 << 16) - 1);
+	String errorMsg = "Last known breadcrumb: ";
+
+	switch (phase) {
+		case BreadcrumbMarker::ALPHA_PASS:				errorMsg += "ALPHA_PASS";				break;
+		case BreadcrumbMarker::BLIT_PASS:				errorMsg += "BLIT_PASS";				break;
+		case BreadcrumbMarker::DEBUG_PASS:				errorMsg += "DEBUG_PASS";				break;
+		case BreadcrumbMarker::LIGHTMAPPER_PASS:		errorMsg += "LIGHTMAPPER_PASS";			break;
+		case BreadcrumbMarker::OPAQUE_PASS:				errorMsg += "OPAQUE_PASS";				break;
+		case BreadcrumbMarker::POST_PROCESSING_PASS:	errorMsg += "POST_PROCESSING_PASS";		break;
+		case BreadcrumbMarker::REFLECTION_PROBES:		errorMsg += "REFLECTION_PROBES";		break;
+		case BreadcrumbMarker::SHADOW_PASS_CUBE:		errorMsg += "SHADOW_PASS_CUBE";			break;
+		case BreadcrumbMarker::SHADOW_PASS_DIRECTIONAL:	errorMsg += "SHADOW_PASS_DIRECTIONAL";	break;
+		case BreadcrumbMarker::SKY_PASS:				errorMsg += "SKY_PASS";					break;
+		case BreadcrumbMarker::TRANSPARENT_PASS:		errorMsg += "TRANSPARENT_PASS";			break;
+		case BreadcrumbMarker::UI_PASS:					errorMsg += "UI_PASS";					break;
+		default: errorMsg += "UNKNOWN_BREADCRUMB(" + itos((uint32_t)phase) + ')'; break;
+	}
+
+	if (user_data != 0) {
+		errorMsg += " | User data: " + itos(user_data);
+	}
+
+	_err_print_error(FUNCTION_STR, __FILE__, __LINE__, errorMsg);
+#endif
+	on_device_lost();
 }
 
 /********************/
@@ -4797,6 +5560,13 @@ uint64_t RenderingDeviceDriverVulkan::get_total_memory_used() {
 	vmaCalculateStatistics(allocator, &stats);
 	return stats.total.statistics.allocationBytes;
 }
+
+// <TF>
+// @ShadyTF lazily allocated memory
+uint64_t RenderingDeviceDriverVulkan::get_lazily_memory_used() {
+	return vmaCalculateLazilyAllocatedBytes(allocator);
+}
+// </TF>
 
 uint64_t RenderingDeviceDriverVulkan::limit_get(Limit p_limit) {
 	const VkPhysicalDeviceLimits &limits = physical_device_properties.limits;
@@ -4945,17 +5715,30 @@ RenderingDeviceDriverVulkan::RenderingDeviceDriverVulkan(RenderingContextDriverV
 	DEV_ASSERT(p_context_driver != nullptr);
 
 	context_driver = p_context_driver;
+	max_descriptor_sets_per_pool = GLOBAL_GET("rendering/rendering_device/vulkan/max_descriptors_per_pool");
+
 }
 
 RenderingDeviceDriverVulkan::~RenderingDeviceDriverVulkan() {
+	buffer_free(breadcrumb_buffer);
+
 	while (small_allocs_pools.size()) {
 		HashMap<uint32_t, VmaPool>::Iterator E = small_allocs_pools.begin();
-		vmaDestroyPool(allocator, E->value);
+			vmaDestroyPool(allocator, E->value);
 		small_allocs_pools.remove(E);
 	}
 	vmaDestroyAllocator(allocator);
 
+	// Destroy linearly allocated descriptor pools
+	for (KeyValue<int, DescriptorSetPools>& pool_map : linear_descriptor_set_pools) {
+		for (KeyValue<DescriptorSetPoolKey, HashMap<VkDescriptorPool, uint32_t>> pools : pool_map.value) {
+			for (KeyValue<VkDescriptorPool, uint32_t> descriptor_pool : pools.value) {
+				vkDestroyDescriptorPool(vk_device, descriptor_pool.key, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DESCRIPTOR_POOL));
+			}
+		}
+	}
+
 	if (vk_device != VK_NULL_HANDLE) {
-		vkDestroyDevice(vk_device, nullptr);
+		vkDestroyDevice(vk_device, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DEVICE));
 	}
 }

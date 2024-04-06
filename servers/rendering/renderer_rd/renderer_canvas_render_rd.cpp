@@ -1183,7 +1183,7 @@ void RendererCanvasRenderRD::_render_items(RID p_to_render_target, int p_item_co
 
 	RD::FramebufferFormatID fb_format = RD::get_singleton()->framebuffer_get_format(framebuffer);
 
-	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(framebuffer, clear ? RD::INITIAL_ACTION_CLEAR : RD::INITIAL_ACTION_LOAD, RD::FINAL_ACTION_STORE, RD::INITIAL_ACTION_LOAD, RD::FINAL_ACTION_DISCARD, clear_colors);
+	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(framebuffer, clear ? RD::INITIAL_ACTION_CLEAR : RD::INITIAL_ACTION_LOAD, RD::FINAL_ACTION_STORE, RD::INITIAL_ACTION_LOAD, RD::FINAL_ACTION_DISCARD, clear_colors, 1, 0, Rect2(), RDD::BreadcrumbMarker::UI_PASS);
 
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, fb_uniform_set, BASE_UNIFORM_SET);
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, state.default_transforms_uniform_set, TRANSFORMS_UNIFORM_SET);
@@ -1734,6 +1734,7 @@ void RendererCanvasRenderRD::_update_shadow_atlas() {
 		state.shadow_fb = RD::get_singleton()->framebuffer_create(fb_textures);
 	}
 }
+
 void RendererCanvasRenderRD::light_update_shadow(RID p_rid, int p_shadow_index, const Transform2D &p_light_xform, int p_light_mask, float p_near, float p_far, LightOccluderInstance *p_occluders) {
 	CanvasLight *cl = canvas_light_owner.get_or_null(p_rid);
 	ERR_FAIL_COND(!cl->shadow.enabled);
@@ -2704,6 +2705,11 @@ RendererCanvasRenderRD::RendererCanvasRenderRD() {
 		for (int i = 0; i < 2; i++) {
 			shadow_render.sdf_render_pipelines[i] = RD::get_singleton()->render_pipeline_create(shadow_render.shader.version_get_shader(shadow_render.shader_version, SHADOW_RENDER_MODE_SDF), shadow_render.sdf_framebuffer_format, shadow_render.sdf_vertex_format, i == 0 ? RD::RENDER_PRIMITIVE_TRIANGLES : RD::RENDER_PRIMITIVE_LINES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), RD::PipelineDepthStencilState(), RD::PipelineColorBlendState::create_disabled(), 0);
 		}
+		// <TF>
+		// @ShadyTF unload shader modules
+		RD::get_singleton()->shader_destroy_modules(shadow_render.shader.version_get_shader(shadow_render.shader_version, SHADOW_RENDER_MODE_SHADOW));
+		RD::get_singleton()->shader_destroy_modules(shadow_render.shader.version_get_shader(shadow_render.shader_version, SHADOW_RENDER_MODE_SDF));
+		// </TF>
 	}
 
 	{ //bindings

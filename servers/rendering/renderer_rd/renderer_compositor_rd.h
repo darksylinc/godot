@@ -73,12 +73,17 @@ protected:
 		float src_rect[4];
 		float dst_rect[4];
 
+		float rotation_sin;
+		float rotation_cos;
+		float pad[2];
+
 		float eye_center[2];
 		float k1;
 		float k2;
 
 		float upscale;
 		float aspect_ratio;
+
 		uint32_t layer;
 		uint32_t convert_to_srgb;
 	};
@@ -91,6 +96,12 @@ protected:
 		RID index_buffer;
 		RID array;
 		RID sampler;
+// <TF>
+// @ShadyTF
+// replace push constants with UBO
+		RID params_uniform_set;
+		RID params_uniform_buffer;
+// </TF>
 	} blit;
 
 	HashMap<RID, RID> render_target_descriptors;

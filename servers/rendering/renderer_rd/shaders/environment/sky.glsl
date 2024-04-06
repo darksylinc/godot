@@ -12,7 +12,17 @@
 
 layout(location = 0) out vec2 uv_interp;
 
+// <TF>
+// @ShadyTF 
+// replacing push constants with uniform buffer
+// Was:
+//layout(push_constant, std430) uniform Params {
+#ifdef USE_PUSH_CONSTANTS
 layout(push_constant, std430) uniform Params {
+#else
+layout(set = 0, binding = 0, std140) uniform Params {
+#endif
+// </TF>
 	mat3 orientation;
 	vec4 projection; // only applicable if not multiview
 	vec3 position;
@@ -52,7 +62,17 @@ void main() {
 
 layout(location = 0) in vec2 uv_interp;
 
+// <TF>
+// @ShadyTF 
+// replacing push constants with uniform buffer
+// Was:
+//layout(push_constant, std430) uniform Params {
+#ifdef USE_PUSH_CONSTANTS
 layout(push_constant, std430) uniform Params {
+#else
+layout(set = 0, binding = 0, std140) uniform Params {
+#endif
+// </TF>
 	mat3 orientation;
 	vec4 projection; // only applicable if not multiview
 	vec3 position;
@@ -283,6 +303,7 @@ void main() {
 	if (!AT_CUBEMAP_PASS && !AT_HALF_RES_PASS && !AT_QUARTER_RES_PASS) {
 		frag_color.a = 0.0;
 	}
+
 
 #ifdef USE_DEBANDING
 	frag_color.rgb += interleaved_gradient_noise(gl_FragCoord.xy) * params.luminance_multiplier;
