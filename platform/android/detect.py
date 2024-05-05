@@ -182,13 +182,16 @@ def configure(env: "SConsEnvironment"):
     if env["arch"] == "x86_32":
         # The NDK adds this if targeting API < 24, so we can drop it when Godot targets it at least
         env.Append(CCFLAGS=["-mstackrealign"])
+        env.Append(LIBPATH=["../../thirdparty/swappy-frame-pacing/x86"])
     elif env["arch"] == "arm32":
         env.Append(CCFLAGS="-march=armv7-a -mfloat-abi=softfp".split())
         env.Append(CPPDEFINES=["__ARM_ARCH_7__", "__ARM_ARCH_7A__"])
         env.Append(CPPDEFINES=["__ARM_NEON__"])
+        env.Append(LIBPATH=["../../thirdparty/swappy-frame-pacing/armeabi-v7a"])
     elif env["arch"] == "arm64":
         env.Append(CCFLAGS=["-mfix-cortex-a53-835769"])
         env.Append(CPPDEFINES=["__ARM_ARCH_8A__"])
+        env.Append(LIBPATH=["../../thirdparty/swappy-frame-pacing/arm64-v8a"])
 
     # Link flags
 
@@ -198,6 +201,8 @@ def configure(env: "SConsEnvironment"):
     env.Prepend(CPPPATH=["#platform/android"])
     env.Append(CPPDEFINES=["ANDROID_ENABLED", "UNIX_ENABLED"])
     env.Append(LIBS=["OpenSLES", "EGL", "android", "log", "z", "dl"])
+    env.Append(LIBS=["swappy_static"])
+    env.Append(LIBPATH=["java/editor/build/intermediates/stripped_native_libs/dev/out/lib/arm64-v8a"])
 
     if env["vulkan"]:
         env.Append(CPPDEFINES=["VULKAN_ENABLED", "RD_ENABLED"])
