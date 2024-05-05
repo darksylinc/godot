@@ -34,8 +34,10 @@ import org.godotengine.godot.input.GodotEditText;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.net.Uri;
@@ -47,9 +49,14 @@ import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Display;
 import android.view.DisplayCutout;
+import android.view.Surface;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 
+import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
+
+import com.google.android.vending.expansion.downloader.Constants;
 
 import java.io.File;
 import java.util.List;
@@ -284,6 +291,21 @@ public class GodotIO {
 			case ActivityInfo.SCREEN_ORIENTATION_LOCKED:
 			default:
 				return -1;
+		}
+	}
+
+	public int getCurrentScreenRotation() {
+		int rotation = ((WindowManager)ContextCompat.getSystemService(activity.getBaseContext(), WindowManager.class)).getDefaultDisplay().getRotation();
+
+		switch (rotation) {
+			case Surface.ROTATION_90:
+				return 90;
+			case Surface.ROTATION_180:
+				return 180;
+			case Surface.ROTATION_270:
+				return 270;
+			default:
+				return 0;
 		}
 	}
 
