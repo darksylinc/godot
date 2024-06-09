@@ -171,16 +171,20 @@ void RenderSceneBuffersRD::configure(const RenderSceneBuffersConfiguration *p_co
 	const bool resolve_target = msaa_3d != RS::VIEWPORT_MSAA_DISABLED;
 	create_texture(RB_SCOPE_BUFFERS, RB_TEX_COLOR, base_data_format, get_color_usage_bits(resolve_target, false, can_be_storage));
 
+	//@ShadyTF : lazily allocated buffers
+	const uint32_t extra_bits = RD::TEXTURE_USAGE_LAZILY_ALLOCATED_BIT;
+	//</TF>
+
 	// Create our depth buffer.
-	create_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH, get_depth_format(resolve_target, false, can_be_storage), get_depth_usage_bits(resolve_target, false, can_be_storage));
+	create_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH, get_depth_format(resolve_target, false, can_be_storage), get_depth_usage_bits(resolve_target, false, can_be_storage) | extra_bits);
 
 	// Create our MSAA buffers.
 	if (msaa_3d == RS::VIEWPORT_MSAA_DISABLED) {
 		texture_samples = RD::TEXTURE_SAMPLES_1;
 	} else {
 		texture_samples = msaa_to_samples(msaa_3d);
-		create_texture(RB_SCOPE_BUFFERS, RB_TEX_COLOR_MSAA, base_data_format, get_color_usage_bits(false, true, can_be_storage), texture_samples);
-		create_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH_MSAA, get_depth_format(false, true, can_be_storage), get_depth_usage_bits(false, true, can_be_storage), texture_samples);
+		create_texture(RB_SCOPE_BUFFERS, RB_TEX_COLOR_MSAA, base_data_format, get_color_usage_bits(false, true, can_be_storage) | extra_bits, texture_samples);
+		create_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH_MSAA, get_depth_format(false, true, can_be_storage), get_depth_usage_bits(false, true, can_be_storage) | extra_bits, texture_samples);
 	}
 
 	// VRS (note, our vrs object will only be set if VRS is supported)

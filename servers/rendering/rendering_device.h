@@ -190,19 +190,65 @@ private:
 	Buffer *_get_buffer_from_owner(RID p_buffer);
 	Error _buffer_initialize(Buffer *p_buffer, const uint8_t *p_data, size_t p_data_size, uint32_t p_required_align = 32);
 
+	// <TF>
 	void update_perf_report();
-
+	// flag for batching descriptor sets
+	bool descriptor_set_batching = true;
+	// flag for separate queue submissions
+	bool separate_queue_submissions = true;
 	uint32_t gpu_copy_count = 0;
 	uint32_t copy_bytes_count = 0;
 	String perf_report_text;
-
+	// </TF>
 	RID_Owner<Buffer, true> uniform_buffer_owner;
 	RID_Owner<Buffer, true> storage_buffer_owner;
 	RID_Owner<Buffer, true> texture_buffer_owner;
 
 public:
 	Error buffer_copy(RID p_src_buffer, RID p_dst_buffer, uint32_t p_src_offset, uint32_t p_dst_offset, uint32_t p_size);
-	Error buffer_update(RID p_buffer, uint32_t p_offset, uint32_t p_size, const void *p_data);
+	/**
+	 * @brief Updates the given GPU buffer at offset and size with the given CPU data.
+	 * @remarks
+	 *	Buffer update is queued into the render graph. The render graph will reorder this operation so
+	 *	that it happens together with other buffer_update() in bulk and before rendering operations
+	 *	(or compute dispatches) that need it.
+	 *
+	 *	This means that the following will not work as intended:
+	 *	@code
+	 *		buffer_update(buffer_a, ..., data_source_x, ...);
+	 *		draw_list_draw(buffer_a);							// render data_render_x.
+	 *		buffer_update(buffer_a, ..., data_source_y, ...);
+	 *		draw_list_draw(buffer_a);							// render data_source_y.
+	 *	@endcode
+	 *
+	 *	Because it will be *reordered* to become the following:
+	 *	@code
+	 *		buffer_update(buffer_a, ..., data_source_x, ...);
+	 *		buffer_update(buffer_a, ..., data_source_y, ...);
+	 *		draw_list_draw(buffer_a); // render data_source_y. <-- Oops! should be data_source_x
+	 *		draw_list_draw(buffer_a); // render data_source_y.
+	 *	@endcode
+	 *
+	 *	When p_skip_check = true, we will perform checks to prevent this situation from happening
+	 *	(buffer_update must not be called while creating a draw or compute list).
+	 *	Do NOT set it to false for user-facing public API because users had trouble understanding
+	 *  this problem when manually creating draw lists.
+	 *
+	 *  Godot internally can set p_skip_check = true when it believes it will only update
+	 *  the buffer once and it needs to be done while a draw/compute list is being created.
+	 *
+	 *  Important: The Vulkan & Metal APIs do not allow issuing copies while inside a RenderPass.
+	 *  We can do it because Godot's render graph will reorder them.
+	 *
+	 * @param p_buffer		GPU buffer to update.
+	 * @param p_offset		Offset in bytes (relative to p_buffer).
+	 * @param p_size		Size in bytes of the data.
+	 * @param p_data		CPU data to transfer to GPU.
+	 *						Pointer can be deleted after buffer_update returns.
+	 * @param p_skip_check	Must always be false for user-facing public API. See remarks.
+	 * @return				Status result of the operation.
+	 */
+	Error buffer_update(RID p_buffer, uint32_t p_offset, uint32_t p_size, const void *p_data, const bool p_skip_check = false);
 	Error buffer_clear(RID p_buffer, uint32_t p_offset, uint32_t p_size);
 	Vector<uint8_t> buffer_get_data(RID p_buffer, uint32_t p_offset = 0, uint32_t p_size = 0); // This causes stall, only use to retrieve large buffers for saving.
 
@@ -599,6 +645,7 @@ public:
 	void framebuffer_set_invalidation_callback(RID p_framebuffer, InvalidationCallback p_callback, void *p_userdata);
 
 	FramebufferFormatID framebuffer_get_format(RID p_framebuffer);
+	Size2 framebuffer_get_size(RID p_framebuffer);
 
 	/*****************/
 	/**** SAMPLER ****/
@@ -877,6 +924,11 @@ public:
 	RID shader_create_from_spirv(const Vector<ShaderStageSPIRVData> &p_spirv, const String &p_shader_name = "");
 	RID shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, RID p_placeholder = RID());
 	RID shader_create_placeholder();
+	// <TF>
+	// @ShadyTF unload shader modules
+	void shader_destroy_modules(RID p_shaderRID);
+	void _destroy_all_shader_modules();
+	// </TF>
 
 	uint64_t shader_get_vertex_input_attribute_mask(RID p_shader);
 
@@ -889,14 +941,33 @@ public:
 		STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT = 1,
 	};
 
+	// <TF>
+	// @ShadyTF
+	// was
+	//
+	//RID uniform_buffer_create(uint32_t p_size_bytes, const Vector<uint8_t> &p_data = Vector<uint8_t>());
+	//RID storage_buffer_create(uint32_t p_size, const Vector<uint8_t> &p_data = Vector<uint8_t>());
+
+	/*****************/
+	/**** BUFFERS ****/
+	/*****************/
+
 	RID uniform_buffer_create(uint32_t p_size_bytes, const Vector<uint8_t> &p_data = Vector<uint8_t>());
 	RID storage_buffer_create(uint32_t p_size, const Vector<uint8_t> &p_data = Vector<uint8_t>(), BitField<StorageBufferUsage> p_usage = 0);
+
+	// <TF>
+
 	RID texture_buffer_create(uint32_t p_size_elements, DataFormat p_format, const Vector<uint8_t> &p_data = Vector<uint8_t>());
 
 	struct Uniform {
 		UniformType uniform_type = UNIFORM_TYPE_IMAGE;
 		uint32_t binding = 0; // Binding index as specified in shader.
 
+		// <TF>
+		// @ShadyTF
+		// immutable samplers, this flag specifies that this is an immutable sampler to be set when creating pipeline layout
+		bool immutable_sampler = false;
+		// </TF>
 	private:
 		// In most cases only one ID is provided per binding, so avoid allocating memory unnecessarily for performance.
 		RID id; // If only one is provided, this is used.
@@ -956,6 +1027,13 @@ public:
 		_FORCE_INLINE_ Uniform() = default;
 	};
 
+	// <TF>
+	// @ShadyTF
+	// immutable samplers
+	// alternate method to create shader from bytecode with immutable samplers provided in
+	typedef Uniform PipelineImmutableSampler;
+	RID shader_create_from_bytecode_with_samplers(const Vector<uint8_t> &p_shader_binary, RID p_placeholder = RID(), const Vector<PipelineImmutableSampler> &r_immutable_samplers = Vector<PipelineImmutableSampler>());
+	// </TF>
 private:
 	static const uint32_t MAX_UNIFORM_SETS = 16;
 	static const uint32_t MAX_PUSH_CONSTANT_SIZE = 128;
@@ -997,7 +1075,13 @@ private:
 	void _uniform_set_update_shared(UniformSet *p_uniform_set);
 
 public:
-	RID uniform_set_create(const Vector<Uniform> &p_uniforms, RID p_shader, uint32_t p_shader_set);
+	// <TF>
+	// @ShadyTF :
+	// descriptor optimizations : allow the option to have linearly allocated uniform set pools for frame allocated uniform sets
+	// Was:
+	//RID uniform_set_create(const Vector<Uniform> &p_uniforms, RID p_shader, uint32_t p_shader_set);
+	RID uniform_set_create(const Vector<Uniform> &p_uniforms, RID p_shader, uint32_t p_shader_set, bool p_linear_pool = false);
+	// <TF>
 	bool uniform_set_is_valid(RID p_uniform_set);
 	void uniform_set_set_invalidation_callback(RID p_uniform_set, InvalidationCallback p_callback, void *p_userdata);
 
@@ -1187,6 +1271,7 @@ public:
 
 	void draw_list_draw(DrawListID p_list, bool p_use_indices, uint32_t p_instances = 1, uint32_t p_procedural_vertices = 0);
 
+	void draw_list_set_viewport(DrawListID p_list, const Rect2 &p_rect);
 	void draw_list_enable_scissor(DrawListID p_list, const Rect2 &p_rect);
 	void draw_list_disable_scissor(DrawListID p_list);
 
@@ -1359,8 +1444,14 @@ private:
 		// The command buffer used by the main thread when recording the frame.
 		RDD::CommandBufferID command_buffer;
 
+		// Used at the end of every frame to blit on the swapchain
+		RDD::CommandBufferID blit_command_buffer;
+
 		// Signaled by the command buffer submission. Present must wait on this semaphore.
 		RDD::SemaphoreID semaphore;
+
+		// TBD
+		RDD::SemaphoreID blit_semaphore;
 
 		// Signaled by the command buffer submission. Must wait on this fence before beginning command recording for the frame.
 		RDD::FenceID fence;
@@ -1397,16 +1488,24 @@ private:
 	int frame = 0;
 	TightLocalVector<Frame> frames;
 	uint64_t frames_drawn = 0;
+	bool screen_prepared = false;
+	RID local_device;
 
 	void _free_pending_resources(int p_frame);
 
 	uint64_t texture_memory = 0;
 	uint64_t buffer_memory = 0;
 
+protected:
+	void execute_chained_cmds(const bool present_swap_chain,
+			const RenderingDeviceDriver::FenceID draw_fence,
+			const RenderingDeviceDriver::SemaphoreID dst_draw_semaphore_to_signal);
+
+public:
 	void _free_internal(RID p_id);
-	void _begin_frame();
+	void _begin_frame(bool presented = false);
 	void _end_frame();
-	void _execute_frame(bool p_present);
+	void _execute_frame(bool p_present, bool p_swap);
 	void _stall_for_previous_frames();
 	void _flush_and_stall_for_all_frames();
 
@@ -1445,6 +1544,7 @@ public:
 	void swap_buffers();
 
 	uint32_t get_frame_delay() const;
+	uint32_t get_current_frame_index() const;
 
 	void submit();
 	void sync();

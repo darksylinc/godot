@@ -49,7 +49,7 @@ public:
 		enum Type {
 			TYPE_NONE,
 			TYPE_BIND_PIPELINE,
-			TYPE_BIND_UNIFORM_SET,
+			TYPE_BIND_UNIFORM_SETS,
 			TYPE_DISPATCH,
 			TYPE_DISPATCH_INDIRECT,
 			TYPE_SET_PUSH_CONSTANT,
@@ -64,7 +64,7 @@ public:
 			TYPE_NONE,
 			TYPE_BIND_INDEX_BUFFER,
 			TYPE_BIND_PIPELINE,
-			TYPE_BIND_UNIFORM_SET,
+			TYPE_BIND_UNIFORM_SETS,
 			TYPE_BIND_VERTEX_BUFFERS,
 			TYPE_CLEAR_ATTACHMENTS,
 			TYPE_DRAW,
@@ -218,6 +218,7 @@ private:
 	};
 
 	struct ComputeInstructionList : InstructionList {
+		bool has_dispatches = false;
 		uint32_t breadcrumb;
 	};
 
@@ -227,6 +228,7 @@ private:
 		Rect2i region;
 		uint32_t breadcrumb;
 		LocalVector<RDD::RenderPassClearValue> clear_values;
+		bool has_draws = false;
 	};
 
 	struct RecordedCommandSort {
@@ -405,10 +407,18 @@ private:
 		RDD::PipelineID pipeline;
 	};
 
-	struct DrawListBindUniformSetInstruction : DrawListInstruction {
-		RDD::UniformSetID uniform_set;
+	struct DrawListBindUniformSetsInstruction : DrawListInstruction {
 		RDD::ShaderID shader;
-		uint32_t set_index = 0;
+		uint32_t first_set_index = 0;
+		uint32_t set_count = 0;
+
+		_FORCE_INLINE_ RDD::UniformSetID *uniform_set_ids() {
+			return reinterpret_cast<RDD::UniformSetID *>(&this[1]);
+		}
+
+		_FORCE_INLINE_ const RDD::UniformSetID *uniform_set_ids() const {
+			return reinterpret_cast<const RDD::UniformSetID *>(&this[1]);
+		}
 	};
 
 	struct DrawListBindVertexBuffersInstruction : DrawListInstruction {
@@ -514,10 +524,18 @@ private:
 		RDD::PipelineID pipeline;
 	};
 
-	struct ComputeListBindUniformSetInstruction : ComputeListInstruction {
-		RDD::UniformSetID uniform_set;
+	struct ComputeListBindUniformSetsInstruction : ComputeListInstruction {
 		RDD::ShaderID shader;
-		uint32_t set_index = 0;
+		uint32_t first_set_index = 0;
+		uint32_t set_count = 0;
+
+		_FORCE_INLINE_ RDD::UniformSetID *uniform_set_ids() {
+			return reinterpret_cast<RDD::UniformSetID *>(&this[1]);
+		}
+
+		_FORCE_INLINE_ const RDD::UniformSetID *uniform_set_ids() const {
+			return reinterpret_cast<const RDD::UniformSetID *>(&this[1]);
+		}
 	};
 
 	struct ComputeListDispatchInstruction : ComputeListInstruction {
@@ -653,6 +671,7 @@ public:
 	void initialize(RDD *p_driver, RenderingContextDriver::Device p_device, uint32_t p_frame_count, RDD::CommandQueueFamilyID p_secondary_command_queue_family, uint32_t p_secondary_command_buffers_per_frame);
 	void finalize();
 	void begin();
+	void reset();
 	void add_buffer_clear(RDD::BufferID p_dst, ResourceTracker *p_dst_tracker, uint32_t p_offset, uint32_t p_size);
 	void add_buffer_copy(RDD::BufferID p_src, ResourceTracker *p_src_tracker, RDD::BufferID p_dst, ResourceTracker *p_dst_tracker, RDD::BufferCopyRegion p_region);
 	void add_buffer_get_data(RDD::BufferID p_src, ResourceTracker *p_src_tracker, RDD::BufferID p_dst, RDD::BufferCopyRegion p_region);
@@ -660,6 +679,7 @@ public:
 	void add_compute_list_begin(RDD::BreadcrumbMarker p_phase = RDD::BreadcrumbMarker::NONE, uint32_t p_breadcrumb_data = 0);
 	void add_compute_list_bind_pipeline(RDD::PipelineID p_pipeline);
 	void add_compute_list_bind_uniform_set(RDD::ShaderID p_shader, RDD::UniformSetID p_uniform_set, uint32_t set_index);
+	void add_compute_list_bind_uniform_sets(RDD::ShaderID p_shader, VectorView<RDD::UniformSetID> p_uniform_set, uint32_t first_set_index, uint32_t set_count);
 	void add_compute_list_dispatch(uint32_t p_x_groups, uint32_t p_y_groups, uint32_t p_z_groups);
 	void add_compute_list_dispatch_indirect(RDD::BufferID p_buffer, uint32_t p_offset);
 	void add_compute_list_set_push_constant(RDD::ShaderID p_shader, const void *p_data, uint32_t p_data_size);
@@ -671,6 +691,7 @@ public:
 	void add_draw_list_bind_index_buffer(RDD::BufferID p_buffer, RDD::IndexBufferFormat p_format, uint32_t p_offset);
 	void add_draw_list_bind_pipeline(RDD::PipelineID p_pipeline, BitField<RDD::PipelineStageBits> p_pipeline_stage_bits);
 	void add_draw_list_bind_uniform_set(RDD::ShaderID p_shader, RDD::UniformSetID p_uniform_set, uint32_t set_index);
+	void add_draw_list_bind_uniform_sets(RDD::ShaderID p_shader, VectorView<RDD::UniformSetID> p_uniform_set, uint32_t first_index, uint32_t set_count);
 	void add_draw_list_bind_vertex_buffers(VectorView<RDD::BufferID> p_vertex_buffers, VectorView<uint64_t> p_vertex_buffer_offsets);
 	void add_draw_list_clear_attachments(VectorView<RDD::AttachmentClear> p_attachments_clear, VectorView<Rect2i> p_attachments_clear_rect);
 	void add_draw_list_draw(uint32_t p_vertex_count, uint32_t p_instance_count);
