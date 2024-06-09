@@ -998,7 +998,7 @@ bool MaterialStorage::MaterialData::update_parameters_uniform_set(const HashMap<
 
 		ubo_data[p_use_linear_color].resize(p_ubo_size);
 		if (ubo_data[p_use_linear_color].size()) {
-			uniform_buffer[p_use_linear_color] = RD::get_singleton()->uniform_buffer_create(ubo_data[p_use_linear_color].size());
+			uniform_buffer[p_use_linear_color] = RD::get_singleton()->uniform_buffer_create(ubo_data[p_use_linear_color].size(), Vector<uint8_t>(), RD::BUFFER_CREATION_PERSISTENT_BIT | RD::BUFFER_CREATION_LINEAR_BIT);
 			memset(ubo_data[p_use_linear_color].ptrw(), 0, ubo_data[p_use_linear_color].size()); //clear
 		}
 
@@ -1025,13 +1025,6 @@ bool MaterialStorage::MaterialData::update_parameters_uniform_set(const HashMap<
 		texture_cache.resize(tex_uniform_count);
 		render_target_cache.clear();
 		p_textures_dirty = true;
-
-		//clear previous uniform set
-		if (uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(uniform_set)) {
-			RD::get_singleton()->uniform_set_set_invalidation_callback(uniform_set, nullptr, nullptr);
-			RD::get_singleton()->free(uniform_set);
-			uniform_set = RID();
-		}
 	}
 
 	if (p_textures_dirty && tex_uniform_count) {
@@ -1078,7 +1071,6 @@ bool MaterialStorage::MaterialData::update_parameters_uniform_set(const HashMap<
 	}
 
 	uniform_set = RD::get_singleton()->uniform_set_create(uniforms, p_shader, p_shader_uniform_set);
-
 	RD::get_singleton()->uniform_set_set_invalidation_callback(uniform_set, MaterialStorage::_material_uniform_set_erased, &self);
 
 	return true;
@@ -1167,7 +1159,7 @@ MaterialStorage::MaterialStorage() {
 	global_shader_uniforms.buffer_usage = memnew_arr(GlobalShaderUniforms::ValueUsage, global_shader_uniforms.buffer_size);
 	global_shader_uniforms.buffer_dirty_regions = memnew_arr(bool, 1 + (global_shader_uniforms.buffer_size / GlobalShaderUniforms::BUFFER_DIRTY_REGION_SIZE));
 	memset(global_shader_uniforms.buffer_dirty_regions, 0, sizeof(bool) * (1 + (global_shader_uniforms.buffer_size / GlobalShaderUniforms::BUFFER_DIRTY_REGION_SIZE)));
-	global_shader_uniforms.buffer = RD::get_singleton()->storage_buffer_create(sizeof(GlobalShaderUniforms::Value) * global_shader_uniforms.buffer_size);
+	global_shader_uniforms.buffer = RD::get_singleton()->storage_buffer_create(sizeof(GlobalShaderUniforms::Value) * global_shader_uniforms.buffer_size, Vector<uint8_t>(), 0, RD::BUFFER_CREATION_PERSISTENT_BIT);
 }
 
 MaterialStorage::~MaterialStorage() {
