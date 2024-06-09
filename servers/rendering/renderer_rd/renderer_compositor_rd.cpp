@@ -41,6 +41,40 @@ void RendererCompositorRD::blit_render_targets_to_screen(DisplayServer::WindowID
 		return;
 	}
 
+	// <TF>
+	// @ShadyTF
+	// replace push constants with UBO
+	for (int i = 0; i < p_amount; i++) {
+		Size2 screen_size(RD::get_singleton()->screen_get_width(p_screen), RD::get_singleton()->screen_get_height(p_screen));
+		// We need to invert the phone rotation
+		int screen_rotation_degrees = -DisplayServer::get_singleton()->screen_get_internal_current_rotation();
+		float screen_rotation = Math::deg_to_rad((float)screen_rotation_degrees);
+
+		blit.push_constant.rotation_cos = cos(screen_rotation);
+		blit.push_constant.rotation_sin = sin(screen_rotation);
+		// Swap width and height when the orientation is not the native one
+		if (screen_rotation_degrees % 180 != 0) {
+			SWAP(screen_size.width, screen_size.height);
+		}
+		blit.push_constant.src_rect[0] = p_render_targets[i].src_rect.position.x;
+		blit.push_constant.src_rect[1] = p_render_targets[i].src_rect.position.y;
+		blit.push_constant.src_rect[2] = p_render_targets[i].src_rect.size.width;
+		blit.push_constant.src_rect[3] = p_render_targets[i].src_rect.size.height;
+		blit.push_constant.dst_rect[0] = p_render_targets[i].dst_rect.position.x / screen_size.width;
+		blit.push_constant.dst_rect[1] = p_render_targets[i].dst_rect.position.y / screen_size.height;
+		blit.push_constant.dst_rect[2] = p_render_targets[i].dst_rect.size.width / screen_size.width;
+		blit.push_constant.dst_rect[3] = p_render_targets[i].dst_rect.size.height / screen_size.height;
+		blit.push_constant.layer = p_render_targets[i].multi_view.layer;
+		blit.push_constant.eye_center[0] = p_render_targets[i].lens_distortion.eye_center.x;
+		blit.push_constant.eye_center[1] = p_render_targets[i].lens_distortion.eye_center.y;
+		blit.push_constant.k1 = p_render_targets[i].lens_distortion.k1;
+		blit.push_constant.k2 = p_render_targets[i].lens_distortion.k2;
+		blit.push_constant.upscale = p_render_targets[i].lens_distortion.upscale;
+		blit.push_constant.aspect_ratio = p_render_targets[i].lens_distortion.aspect_ratio;
+		blit.push_constant.convert_to_srgb = texture_storage->render_target_is_using_hdr(p_render_targets[i].render_target);
+		RD::RenderingDevice::get_singleton()->buffer_update(blit.params_uniform_buffer, 0, sizeof(BlitPushConstant), &blit.push_constant);
+	}
+	// </TF>
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin_for_screen(p_screen);
 	ERR_FAIL_COND(draw_list == RD::INVALID_ID);
 
@@ -94,7 +128,14 @@ void RendererCompositorRD::blit_render_targets_to_screen(DisplayServer::WindowID
 		blit.push_constant.aspect_ratio = p_render_targets[i].lens_distortion.aspect_ratio;
 		blit.push_constant.convert_to_srgb = texture_storage->render_target_is_using_hdr(p_render_targets[i].render_target);
 
-		RD::get_singleton()->draw_list_set_push_constant(draw_list, &blit.push_constant, sizeof(BlitPushConstant));
+		// <TF>
+		// @ShadyTF
+		// replace push constants with UBO
+		// Was:
+		//RD::get_singleton()->draw_list_set_push_constant(draw_list, &blit.push_constant, sizeof(BlitPushConstant));
+		RD::get_singleton()->draw_list_bind_uniform_set(draw_list, blit.params_uniform_set, 4);
+		// </TF>
+
 		RD::get_singleton()->draw_list_draw(draw_list, true);
 	}
 
@@ -134,6 +175,10 @@ void RendererCompositorRD::initialize() {
 
 		for (int i = 0; i < BLIT_MODE_MAX; i++) {
 			blit.pipelines[i] = RD::get_singleton()->render_pipeline_create(blit.shader.version_get_shader(blit.shader_version, i), RD::get_singleton()->screen_get_framebuffer_format(DisplayServer::MAIN_WINDOW_ID), RD::INVALID_ID, RD::RENDER_PRIMITIVE_TRIANGLES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), RD::PipelineDepthStencilState(), i == BLIT_MODE_NORMAL_ALPHA ? RenderingDevice::PipelineColorBlendState::create_blend() : RenderingDevice::PipelineColorBlendState::create_disabled(), 0);
+			// <TF>
+			// @ShadyTF unload shader modules
+			RD::get_singleton()->shader_destroy_modules(blit.shader.version_get_shader(blit.shader_version, i));
+			// </TF>
 		}
 
 		//create index array for copy shader
@@ -153,6 +198,19 @@ void RendererCompositorRD::initialize() {
 		blit.array = RD::get_singleton()->index_array_create(blit.index_buffer, 0, 6);
 
 		blit.sampler = RD::get_singleton()->sampler_create(RD::SamplerState());
+		// <TF>
+		// @ShadyTF
+		// replace push constants with UBO
+		uint32_t params_size = sizeof(BlitPushConstant);
+		blit.params_uniform_buffer = RD::RenderingDevice::get_singleton()->uniform_buffer_create(params_size, Vector<uint8_t>());
+		Vector<RD::Uniform> params_uniforms;
+		RD::Uniform u;
+		u.binding = 0;
+		u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
+		u.append_id(blit.params_uniform_buffer);
+		params_uniforms.push_back(u);
+		blit.params_uniform_set = RD::RenderingDevice::get_singleton()->uniform_set_create(params_uniforms, blit.shader.version_get_shader(blit.shader_version, 0), 4);
+		// </TF>
 	}
 }
 
@@ -232,6 +290,31 @@ void RendererCompositorRD::set_boot_image(const Ref<Image> &p_image, const Color
 
 	screenrect.position /= window_size;
 	screenrect.size /= window_size;
+	// <TF>
+	// @ShadyTF
+	// replace push constants with UBO
+	int screen_rotation_degrees = DisplayServer::get_singleton()->screen_get_internal_current_rotation();
+	float screen_rotation = Math::deg_to_rad((float)screen_rotation_degrees);
+	blit.push_constant.rotation_cos = cos(screen_rotation);
+	blit.push_constant.rotation_sin = sin(screen_rotation);
+	blit.push_constant.src_rect[0] = 0.0;
+	blit.push_constant.src_rect[1] = 0.0;
+	blit.push_constant.src_rect[2] = 1.0;
+	blit.push_constant.src_rect[3] = 1.0;
+	blit.push_constant.dst_rect[0] = screenrect.position.x;
+	blit.push_constant.dst_rect[1] = screenrect.position.y;
+	blit.push_constant.dst_rect[2] = screenrect.size.width;
+	blit.push_constant.dst_rect[3] = screenrect.size.height;
+	blit.push_constant.layer = 0;
+	blit.push_constant.eye_center[0] = 0;
+	blit.push_constant.eye_center[1] = 0;
+	blit.push_constant.k1 = 0;
+	blit.push_constant.k2 = 0;
+	blit.push_constant.upscale = 1.0;
+	blit.push_constant.aspect_ratio = 1.0;
+	blit.push_constant.convert_to_srgb = false;
+	RD::RenderingDevice::get_singleton()->buffer_update(blit.params_uniform_buffer, 0, sizeof(BlitPushConstant), &blit.push_constant);
+	// </TF>
 
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin_for_screen(DisplayServer::MAIN_WINDOW_ID, p_color);
 
@@ -239,6 +322,11 @@ void RendererCompositorRD::set_boot_image(const Ref<Image> &p_image, const Color
 	RD::get_singleton()->draw_list_bind_index_array(draw_list, blit.array);
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uset, 0);
 
+	// <TF>
+	// @ShadyTF
+	// replace push constants with UBO
+	// Was:
+	/*
 	int screen_rotation_degrees = DisplayServer::get_singleton()->screen_get_internal_current_rotation();
 	float screen_rotation = Math::deg_to_rad((float)screen_rotation_degrees);
 	blit.push_constant.rotation_cos = cos(screen_rotation);
@@ -261,6 +349,9 @@ void RendererCompositorRD::set_boot_image(const Ref<Image> &p_image, const Color
 	blit.push_constant.convert_to_srgb = false;
 
 	RD::get_singleton()->draw_list_set_push_constant(draw_list, &blit.push_constant, sizeof(BlitPushConstant));
+	*/
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, blit.params_uniform_set, 4);
+	// </TF>
 	RD::get_singleton()->draw_list_draw(draw_list, true);
 
 	RD::get_singleton()->draw_list_end();
