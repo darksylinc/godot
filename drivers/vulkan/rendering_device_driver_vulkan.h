@@ -190,6 +190,10 @@ public:
 			uint64_t size = UINT64_MAX;
 		} allocation;
 		uint64_t size = 0;
+		// <TF>
+		// persistent mapped address
+		uint8_t *mapped_address = VK_NULL_HANDLE;
+		// </TF>
 		VkBufferView vk_view = VK_NULL_HANDLE; // For texel buffers.
 	};
 
@@ -199,7 +203,6 @@ public:
 	virtual uint64_t buffer_get_allocation_size(BufferID p_buffer) override final;
 	virtual uint8_t *buffer_map(BufferID p_buffer) override final;
 	virtual void buffer_unmap(BufferID p_buffer) override final;
-
 	/*****************/
 	/**** TEXTURE ****/
 	/*****************/
@@ -315,7 +318,10 @@ private:
 
 public:
 	virtual CommandQueueID command_queue_create(CommandQueueFamilyID p_cmd_queue_family, bool p_identify_as_main_queue = false) override final;
-	virtual Error command_queue_execute_and_present(CommandQueueID p_cmd_queue, VectorView<SemaphoreID> p_wait_semaphores, VectorView<CommandBufferID> p_cmd_buffers, VectorView<SemaphoreID> p_cmd_semaphores, FenceID p_cmd_fence, VectorView<SwapChainID> p_swap_chains) override final;
+	virtual Error command_queue_execute_and_present(CommandQueueID p_cmd_queue,
+													VectorView<SemaphoreID> p_wait_semaphores,
+													VectorView<CommandBufferID> p_cmd_buffers,
+													VectorView<SemaphoreID> p_cmd_semaphores, FenceID p_cmd_fence, VectorView<SwapChainID> p_swap_chains) override final;
 	virtual void command_queue_free(CommandQueueID p_cmd_queue) override final;
 
 private:
@@ -328,6 +334,7 @@ private:
 
 public:
 	virtual CommandPoolID command_pool_create(CommandQueueFamilyID p_cmd_queue_family, CommandBufferType p_cmd_buffer_type) override final;
+	virtual bool command_pool_reset(CommandPoolID p_cmd_pool) override final;
 	virtual void command_pool_free(CommandPoolID p_cmd_pool) override final;
 
 	// ----- BUFFER -----
@@ -429,7 +436,14 @@ private:
 public:
 	virtual String shader_get_binary_cache_key() override final;
 	virtual Vector<uint8_t> shader_compile_binary_from_spirv(VectorView<ShaderStageSPIRVData> p_spirv, const String &p_shader_name) override final;
-	virtual ShaderID shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name) override final;
+	// <TF>
+	// @ShadyTF
+	// adding support of immutable samplers, which can be embedded when creating the pipeline layout on the condition they remain
+	// valid and unchanged, so they don't need to be specified when creating uniform sets
+	// Was:
+	//virtual ShaderID shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name) override final;
+	virtual ShaderID shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name, const Vector<ImmutableSampler> &r_immutableSamplers) override final;
+	// </TF>
 	virtual void shader_free(ShaderID p_shader) override final;
 
 	virtual void shader_destroy_modules(ShaderID p_shader) override final;
@@ -467,17 +481,44 @@ private:
 	DescriptorSetPools descriptor_set_pools;
 	uint32_t max_descriptor_sets_per_pool = 0;
 
-	VkDescriptorPool _descriptor_set_pool_find_or_create(const DescriptorSetPoolKey &p_key, DescriptorSetPools::Iterator *r_pool_sets_it);
-	void _descriptor_set_pool_unreference(DescriptorSetPools::Iterator p_pool_sets_it, VkDescriptorPool p_vk_descriptor_pool);
+	// <TF>
+	// @ShadyTF :
+	// descriptor optimizations : linear allocation of descriptor set pools
+	// Was :
+	// VkDescriptorPool _descriptor_set_pool_find_or_create(const DescriptorSetPoolKey &p_key, DescriptorSetPools::Iterator *r_pool_sets_it);
+	// void _descriptor_set_pool_unreference(DescriptorSetPools::Iterator p_pool_sets_it, VkDescriptorPool p_vk_descriptor_pool);
+	HashMap<int, DescriptorSetPools> linear_descriptor_set_pools;
+	bool linear_descriptor_pools_enabled = true;
+	VkDescriptorPool _descriptor_set_pool_find_or_create(const DescriptorSetPoolKey &p_key, DescriptorSetPools::Iterator *r_pool_sets_it, int p_linear_pool_index);
+	void _descriptor_set_pool_unreference(DescriptorSetPools::Iterator p_pool_sets_it, VkDescriptorPool p_vk_descriptor_pool, int p_linear_pool_index);
+	// </TF>
+
+	// <TF>
+	// @ShadyTF :
+	// global  flag to toggle usage of immutable sampler when creating  pipeline layouts and for skipping when creating uniform sets
+	bool immutable_samplers_enabled = true;
+	// </TF>
 
 	struct UniformSetInfo {
 		VkDescriptorSet vk_descriptor_set = VK_NULL_HANDLE;
 		VkDescriptorPool vk_descriptor_pool = VK_NULL_HANDLE;
+		// <TF>
+		// @ShadyTF :
+		// descriptor optimizations : linear allocation of descriptor set pools
+		VkDescriptorPool vk_linear_descriptor_pool = VK_NULL_HANDLE;
+		// </TF>
 		DescriptorSetPools::Iterator pool_sets_it = {};
 	};
 
 public:
-	virtual UniformSetID uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index) override final;
+	// <TF>
+	// @ShadyTF :
+	// descriptor optimizations : linear allocation of descriptor set pools
+	// Was:
+	// virtual UniformSetID uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index) override final;
+	virtual UniformSetID uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index, int p_linear_pool_index) override final;
+	virtual void linear_uniform_set_pools_reset(int p_linear_pool_index) override final;
+	// </TF>
 	virtual void uniform_set_free(UniformSetID p_uniform_set) override final;
 
 	// ----- COMMANDS -----
@@ -560,6 +601,7 @@ public:
 	// Binding.
 	virtual void command_bind_render_pipeline(CommandBufferID p_cmd_buffer, PipelineID p_pipeline) override final;
 	virtual void command_bind_render_uniform_set(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index) override final;
+	virtual void command_bind_render_uniform_sets(CommandBufferID p_cmd_buffer, VectorView<UniformSetID> p_uniform_sets, ShaderID p_shader, uint32_t p_first_set_index, uint32_t p_set_count) override final;
 
 	// Drawing.
 	virtual void command_render_draw(CommandBufferID p_cmd_buffer, uint32_t p_vertex_count, uint32_t p_instance_count, uint32_t p_base_vertex, uint32_t p_first_instance) override final;
@@ -602,6 +644,7 @@ public:
 	// Binding.
 	virtual void command_bind_compute_pipeline(CommandBufferID p_cmd_buffer, PipelineID p_pipeline) override final;
 	virtual void command_bind_compute_uniform_set(CommandBufferID p_cmd_buffer, UniformSetID p_uniform_set, ShaderID p_shader, uint32_t p_set_index) override final;
+	virtual void command_bind_compute_uniform_sets(CommandBufferID p_cmd_buffer, VectorView<UniformSetID> p_uniform_sets, ShaderID p_shader, uint32_t p_first_set_index, uint32_t p_set_count) override final;
 
 	// Dispatching.
 	virtual void command_compute_dispatch(CommandBufferID p_cmd_buffer, uint32_t p_x_groups, uint32_t p_y_groups, uint32_t p_z_groups) override final;
@@ -655,7 +698,10 @@ public:
 	virtual void set_object_name(ObjectType p_type, ID p_driver_id, const String &p_name) override final;
 	virtual uint64_t get_resource_native_handle(DriverResource p_type, ID p_driver_id) override final;
 	virtual uint64_t get_total_memory_used() override final;
-
+	// <TF>
+	// @ShadyTF lazily allocated memory
+	virtual uint64_t get_lazily_memory_used() override final;
+	// </TF>
 	virtual uint64_t limit_get(Limit p_limit) override final;
 	virtual uint64_t api_trait_get(ApiTrait p_trait) override final;
 	virtual bool has_feature(Features p_feature) override final;

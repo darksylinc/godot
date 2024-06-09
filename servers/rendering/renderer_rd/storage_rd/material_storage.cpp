@@ -1109,13 +1109,6 @@ bool MaterialStorage::MaterialData::update_parameters_uniform_set(const HashMap<
 		texture_cache.resize(tex_uniform_count);
 		render_target_cache.clear();
 		p_textures_dirty = true;
-
-		//clear previous uniform set
-		if (uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(uniform_set)) {
-			RD::get_singleton()->uniform_set_set_invalidation_callback(uniform_set, nullptr, nullptr);
-			RD::get_singleton()->free(uniform_set);
-			uniform_set = RID();
-		}
 	}
 
 	if (p_textures_dirty && tex_uniform_count) {
@@ -1162,7 +1155,6 @@ bool MaterialStorage::MaterialData::update_parameters_uniform_set(const HashMap<
 	}
 
 	uniform_set = RD::get_singleton()->uniform_set_create(uniforms, p_shader, p_shader_uniform_set);
-
 	RD::get_singleton()->uniform_set_set_invalidation_callback(uniform_set, MaterialStorage::_material_uniform_set_erased, &self);
 
 	return true;
