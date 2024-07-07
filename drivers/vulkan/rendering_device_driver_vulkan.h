@@ -207,6 +207,10 @@ public:
 	virtual uint64_t buffer_get_allocation_size(BufferID p_buffer) override final;
 	virtual uint8_t *buffer_map(BufferID p_buffer) override final;
 	virtual void buffer_unmap(BufferID p_buffer) override final;
+	// <TF>
+	// @ShadyTF -- getter for persistent mapped address
+	virtual uint8_t *buffer_get_persistent_address(BufferID p_buffer) override final;
+	// </TF>
 	/*****************/
 	/**** TEXTURE ****/
 	/*****************/

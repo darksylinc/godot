@@ -1495,6 +1495,16 @@ RDD::BufferID RenderingDeviceDriverVulkan::buffer_create(uint64_t p_size, BitFie
 			alloc_create_info.requiredFlags = (VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 		} break;
 		case MEMORY_ALLOCATION_TYPE_GPU: {
+			// <TF>
+			// @ShadyTF
+			// condition to use persistent memory, UMA, condition would be passed in
+			if (p_usage & BUFFER_USAGE_PERSISTENT_BIT) {
+				alloc_create_info.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+				alloc_create_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+			} else {
+				alloc_create_info.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+			}
+			// </TF>
 			if (p_size <= SMALL_ALLOCATION_MAX_SIZE) {
 				uint32_t mem_type_index = 0;
 				vmaFindMemoryTypeIndexForBufferInfo(allocator, &create_info, &alloc_create_info, &mem_type_index);
@@ -1574,6 +1584,15 @@ void RenderingDeviceDriverVulkan::buffer_unmap(BufferID p_buffer) {
 	const BufferInfo *buf_info = (const BufferInfo *)p_buffer.id;
 	vmaUnmapMemory(allocator, buf_info->allocation.handle);
 }
+
+// <TF>
+// @ShadyTF : return persistent mapped adreess
+uint8_t *RenderingDeviceDriverVulkan::buffer_get_persistent_address(BufferID p_buffer) {
+	//VkBuffer vk_buffer = (VkBuffer)p_buffer.id;
+	const BufferInfo *buf_info = (const BufferInfo *)p_buffer.id;
+	return buf_info->mapped_address;
+}
+// </TF>
 
 /*****************/
 /**** TEXTURE ****/

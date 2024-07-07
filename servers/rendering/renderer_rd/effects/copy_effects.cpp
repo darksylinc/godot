@@ -131,7 +131,7 @@ CopyEffects::CopyEffects(bool p_prefer_raster_effects) {
 		// replace push constants with UBO
 		// prepare uniform set and buffer
 		for (uint32_t i = 0; i < RD::get_singleton()->get_frame_delay(); i++) {
-			copy.params_uniform_buffer[i] = RD::get_singleton()->uniform_buffer_create(sizeof(CopyPushConstant));
+			copy.params_uniform_buffer[i] = RD::get_singleton()->uniform_buffer_create(sizeof(CopyPushConstant), Vector<uint8_t>(), RD::BUFFER_CREATION_PERSISTENT_BIT | RD::BUFFER_CREATION_LINEAR_BIT);
 		}
 		// </TF>
 	}
@@ -170,7 +170,7 @@ CopyEffects::CopyEffects(bool p_prefer_raster_effects) {
 		// prepare uniform set and buffer
 		for (uint32_t i = 0; i < RD::get_singleton()->get_frame_delay(); i++) {
 			uint32_t params_size = sizeof(CopyToFbPushConstant);
-			copy_to_fb.params_uniform_buffer[i] = RD::RenderingDevice::get_singleton()->uniform_buffer_create(params_size);
+			copy_to_fb.params_uniform_buffer[i] = RD::RenderingDevice::get_singleton()->uniform_buffer_create(params_size, Vector<uint8_t>(), RD::BUFFER_CREATION_PERSISTENT_BIT | RD::BUFFER_CREATION_LINEAR_BIT);
 		}
 		// </TF>
 	}

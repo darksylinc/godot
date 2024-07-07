@@ -181,12 +181,26 @@ private:
 	Error _buffer_update(Buffer *p_buffer, RID p_buffer_id, size_t p_offset, const uint8_t *p_data, size_t p_data_size, bool p_use_draw_queue = false, uint32_t p_required_align = 32);
 
 	// <TF>
+	// @ShadyTF persistently mapped buffers
+	struct LinearBuffer {
+		uint32_t size;
+		BitField<RDD::BufferUsageBits> usage;
+		int usage_index;
+		int usage_frame;
+		Vector<Buffer> buffers;
+	};
+	RID_Owner<LinearBuffer> linear_buffer_owner;
+	void linear_uniform_buffer_advance(RID p_buffer);
+	void linear_uniform_buffers_reset();
 	void update_perf_report();
+	// flag for using persistent buffers;
+	bool persistent_buffer_enabled = true;
 	// flag for batching descriptor sets
 	bool descriptor_set_batching = true;
 	// flag for separate queue submissions
 	bool separate_queue_submissions = true;
 	uint32_t gpu_copy_count = 0;
+	uint32_t direct_copy_count = 0;
 	uint32_t copy_bytes_count = 0;
 	String perf_report_text;
 	// </TF>
@@ -886,8 +900,14 @@ public:
 	/**** BUFFERS ****/
 	/*****************/
 
-	RID uniform_buffer_create(uint32_t p_size_bytes, const Vector<uint8_t> &p_data = Vector<uint8_t>());
-	RID storage_buffer_create(uint32_t p_size, const Vector<uint8_t> &p_data = Vector<uint8_t>(), BitField<StorageBufferUsage> p_usage = 0);
+	enum BufferCreationBits {
+		BUFFER_CREATION_PERSISTENT_BIT = (1 << 0),
+		BUFFER_CREATION_LINEAR_BIT = (1 << 1)
+	};
+
+	RID linear_buffer_create(uint32_t p_size_bytes, bool p_storage, BitField<StorageBufferUsage> p_usage = 0);
+	RID uniform_buffer_create(uint32_t p_size_bytes, const Vector<uint8_t> &p_data = Vector<uint8_t>(), BitField<BufferCreationBits> p_creation_bits = 0);
+	RID storage_buffer_create(uint32_t p_size, const Vector<uint8_t> &p_data = Vector<uint8_t>(), BitField<StorageBufferUsage> p_usage = 0, BitField<BufferCreationBits> p_creation_bits = 0);
 
 	// <TF>
 
@@ -1561,6 +1581,11 @@ VARIANT_ENUM_CAST(RenderingDevice::BreadcrumbMarker)
 #ifndef DISABLE_DEPRECATED
 VARIANT_BITFIELD_CAST(RenderingDevice::BarrierMask);
 #endif
+
+// <TF>
+// @ShadyTF
+VARIANT_BITFIELD_CAST(RenderingDevice::BufferCreationBits);
+// </TF>
 
 typedef RenderingDevice RD;
 
