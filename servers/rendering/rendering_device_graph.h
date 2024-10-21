@@ -225,7 +225,9 @@ private:
 		RDD::RenderPassID render_pass;
 		RDD::FramebufferID framebuffer;
 		Rect2i region;
+#if defined(DEBUG_ENABLED) || defined(DEV_ENABLED)
 		uint32_t breadcrumb;
+#endif
 		LocalVector<RDD::RenderPassClearValue> clear_values;
 	};
 

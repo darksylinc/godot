@@ -43,6 +43,10 @@
 /**** GENERIC ****/
 /*****************/
 
+#if defined(DEBUG_ENABLED) || defined(DEV_ENABLED)
+static const uint32_t BREADCRUMB_BUFFER_ENTRIES = 512u;
+#endif
+
 static const VkFormat RD_TO_VK_FORMAT[RDD::DATA_FORMAT_MAX] = {
 	VK_FORMAT_R4G4_UNORM_PACK8,
 	VK_FORMAT_R4G4B4A4_UNORM_PACK16,
@@ -1370,7 +1374,10 @@ Error RenderingDeviceDriverVulkan::initialize(uint32_t p_device_index, uint32_t 
 	ERR_FAIL_COND_V(err != OK, err);
 
 	max_descriptor_sets_per_pool = GLOBAL_GET("rendering/rendering_device/vulkan/max_descriptors_per_pool");
-	breadcrumb_buffer = buffer_create(sizeof(uint32_t), BufferUsageBits::BUFFER_USAGE_TRANSFER_TO_BIT, MemoryAllocationType::MEMORY_ALLOCATION_TYPE_CPU);
+
+#if defined(DEBUG_ENABLED) || defined(DEV_ENABLED)
+	breadcrumb_buffer = buffer_create(sizeof(uint32_t) * BREADCRUMB_BUFFER_ENTRIES, BufferUsageBits::BUFFER_USAGE_TRANSFER_TO_BIT, MemoryAllocationType::MEMORY_ALLOCATION_TYPE_CPU);
+#endif
 
 	return OK;
 }
@@ -4976,10 +4983,19 @@ void RenderingDeviceDriverVulkan::command_end_label(CommandBufferID p_cmd_buffer
 /**** DEBUG *****/
 /****************/
 void RenderingDeviceDriverVulkan::command_insert_breadcrumb(CommandBufferID p_cmd_buffer, uint32_t p_data) {
+#if defined(DEBUG_ENABLED) || defined(DEV_ENABLED)
 	if (p_data == BreadcrumbMarker::NONE) {
 		return;
 	}
-	vkCmdFillBuffer((VkCommandBuffer)p_cmd_buffer.id, ((BufferInfo *)breadcrumb_buffer.id)->vk_buffer, 0, sizeof(uint32_t), p_data);
+
+	// We write to a circular buffer. If you're getting barrier sync errors here,
+	// increase the value of BREADCRUMB_BUFFER_ENTRIES.
+	vkCmdFillBuffer((VkCommandBuffer)p_cmd_buffer.id, ((BufferInfo *)breadcrumb_buffer.id)->vk_buffer, breadcrumb_offset, sizeof(uint32_t), p_data);
+	breadcrumb_offset += sizeof(uint32_t);
+	if (breadcrumb_offset >= BREADCRUMB_BUFFER_ENTRIES * sizeof(uint32_t)) {
+		breadcrumb_offset = 0u;
+	}
+#endif
 }
 
 void RenderingDeviceDriverVulkan::on_device_lost() const {
@@ -5061,64 +5077,89 @@ void RenderingDeviceDriverVulkan::on_device_lost() const {
 
 void RenderingDeviceDriverVulkan::print_lost_device_info() {
 #if defined(DEBUG_ENABLED) || defined(DEV_ENABLED)
-	void *breadcrumb_ptr;
-	vmaFlushAllocation(allocator, ((BufferInfo *)breadcrumb_buffer.id)->allocation.handle, 0, sizeof(uint32_t));
-	vmaInvalidateAllocation(allocator, ((BufferInfo *)breadcrumb_buffer.id)->allocation.handle, 0, sizeof(uint32_t));
-
-	vmaMapMemory(allocator, ((BufferInfo *)breadcrumb_buffer.id)->allocation.handle, &breadcrumb_ptr);
-	uint32_t last_breadcrumb = *(uint32_t *)breadcrumb_ptr;
-	vmaUnmapMemory(allocator, ((BufferInfo *)breadcrumb_buffer.id)->allocation.handle);
-	uint32_t phase = last_breadcrumb & uint32_t(~((1 << 16) - 1));
-	uint32_t user_data = last_breadcrumb & ((1 << 16) - 1);
-	String error_msg = "Last known breadcrumb: ";
-
-	switch (phase) {
-		case BreadcrumbMarker::ALPHA_PASS:
-			error_msg += "ALPHA_PASS";
-			break;
-		case BreadcrumbMarker::BLIT_PASS:
-			error_msg += "BLIT_PASS";
-			break;
-		case BreadcrumbMarker::DEBUG_PASS:
-			error_msg += "DEBUG_PASS";
-			break;
-		case BreadcrumbMarker::LIGHTMAPPER_PASS:
-			error_msg += "LIGHTMAPPER_PASS";
-			break;
-		case BreadcrumbMarker::OPAQUE_PASS:
-			error_msg += "OPAQUE_PASS";
-			break;
-		case BreadcrumbMarker::POST_PROCESSING_PASS:
-			error_msg += "POST_PROCESSING_PASS";
-			break;
-		case BreadcrumbMarker::REFLECTION_PROBES:
-			error_msg += "REFLECTION_PROBES";
-			break;
-		case BreadcrumbMarker::SHADOW_PASS_CUBE:
-			error_msg += "SHADOW_PASS_CUBE";
-			break;
-		case BreadcrumbMarker::SHADOW_PASS_DIRECTIONAL:
-			error_msg += "SHADOW_PASS_DIRECTIONAL";
-			break;
-		case BreadcrumbMarker::SKY_PASS:
-			error_msg += "SKY_PASS";
-			break;
-		case BreadcrumbMarker::TRANSPARENT_PASS:
-			error_msg += "TRANSPARENT_PASS";
-			break;
-		case BreadcrumbMarker::UI_PASS:
-			error_msg += "UI_PASS";
-			break;
-		default:
-			error_msg += "UNKNOWN_BREADCRUMB(" + itos((uint32_t)phase) + ')';
-			break;
+	_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Printing last known breadcrumbs in reverse order (last executed first).");
+	const bool accurate_breadcrumbs = false;
+	if (!accurate_breadcrumbs) {
+		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Some of them might be inaccurate. Try running with --accurate-breadcrumbs for precise information.");
 	}
 
-	if (user_data != 0) {
-		error_msg += " | User data: " + itos(user_data);
+	uint32_t last_breadcrumb_offset = breadcrumb_offset;
+	uint8_t *breadcrumb_ptr = nullptr;
+
+	vmaFlushAllocation(allocator, ((BufferInfo *)breadcrumb_buffer.id)->allocation.handle, 0, BREADCRUMB_BUFFER_ENTRIES * sizeof(uint32_t));
+	vmaInvalidateAllocation(allocator, ((BufferInfo *)breadcrumb_buffer.id)->allocation.handle, 0, BREADCRUMB_BUFFER_ENTRIES * sizeof(uint32_t));
+	{
+		void *ptr = nullptr;
+		vmaMapMemory(allocator, ((BufferInfo *)breadcrumb_buffer.id)->allocation.handle, &ptr);
+		breadcrumb_ptr = reinterpret_cast<uint8_t *>(ptr);
 	}
 
-	_err_print_error(FUNCTION_STR, __FILE__, __LINE__, error_msg);
+	const size_t entries_to_print = 8u; // Note: The value is arbitrary.
+	for (size_t i = 0u; i < entries_to_print; ++i) {
+		if (last_breadcrumb_offset == 0u) {
+			// Decrement last_breadcrumb_idx, wrapping underflow.
+			last_breadcrumb_offset = BREADCRUMB_BUFFER_ENTRIES * sizeof(uint32_t);
+		}
+		last_breadcrumb_offset -= sizeof(uint32_t);
+
+		const uint32_t last_breadcrumb = *reinterpret_cast<uint32_t *>(breadcrumb_ptr + last_breadcrumb_offset);
+		const uint32_t phase = last_breadcrumb & uint32_t(~((1 << 16) - 1));
+		const uint32_t user_data = last_breadcrumb & ((1 << 16) - 1);
+		String error_msg = "Last known breadcrumb: ";
+
+		switch (phase) {
+			case BreadcrumbMarker::ALPHA_PASS:
+				error_msg += "ALPHA_PASS";
+				break;
+			case BreadcrumbMarker::BLIT_PASS:
+				error_msg += "BLIT_PASS";
+				break;
+			case BreadcrumbMarker::DEBUG_PASS:
+				error_msg += "DEBUG_PASS";
+				break;
+			case BreadcrumbMarker::LIGHTMAPPER_PASS:
+				error_msg += "LIGHTMAPPER_PASS";
+				break;
+			case BreadcrumbMarker::OPAQUE_PASS:
+				error_msg += "OPAQUE_PASS";
+				break;
+			case BreadcrumbMarker::POST_PROCESSING_PASS:
+				error_msg += "POST_PROCESSING_PASS";
+				break;
+			case BreadcrumbMarker::REFLECTION_PROBES:
+				error_msg += "REFLECTION_PROBES";
+				break;
+			case BreadcrumbMarker::SHADOW_PASS_CUBE:
+				error_msg += "SHADOW_PASS_CUBE";
+				break;
+			case BreadcrumbMarker::SHADOW_PASS_DIRECTIONAL:
+				error_msg += "SHADOW_PASS_DIRECTIONAL";
+				break;
+			case BreadcrumbMarker::SKY_PASS:
+				error_msg += "SKY_PASS";
+				break;
+			case BreadcrumbMarker::TRANSPARENT_PASS:
+				error_msg += "TRANSPARENT_PASS";
+				break;
+			case BreadcrumbMarker::UI_PASS:
+				error_msg += "UI_PASS";
+				break;
+			default:
+				error_msg += "UNKNOWN_BREADCRUMB(" + itos((uint32_t)phase) + ')';
+				break;
+		}
+
+		if (user_data != 0) {
+			error_msg += " | User data: " + itos(user_data);
+		}
+
+		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, error_msg);
+	}
+
+	if (breadcrumb_ptr) {
+		vmaUnmapMemory(allocator, ((BufferInfo *)breadcrumb_buffer.id)->allocation.handle);
+		breadcrumb_ptr = nullptr;
+	}
 #endif
 	on_device_lost();
 }
@@ -5389,7 +5430,9 @@ RenderingDeviceDriverVulkan::RenderingDeviceDriverVulkan(RenderingContextDriverV
 }
 
 RenderingDeviceDriverVulkan::~RenderingDeviceDriverVulkan() {
+#if defined(DEBUG_ENABLED) || defined(DEV_ENABLED)
 	buffer_free(breadcrumb_buffer);
+#endif
 
 	while (small_allocs_pools.size()) {
 		HashMap<uint32_t, VmaPool>::Iterator E = small_allocs_pools.begin();
