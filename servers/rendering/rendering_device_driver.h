@@ -418,7 +418,7 @@ public:
 	virtual Error command_queue_execute_and_present(CommandQueueID p_cmd_queue, VectorView<SemaphoreID> p_wait_semaphores, VectorView<CommandBufferID> p_cmd_buffers, VectorView<SemaphoreID> p_cmd_semaphores, FenceID p_cmd_fence, VectorView<SwapChainID> p_swap_chains) = 0;
 	virtual void command_queue_free(CommandQueueID p_cmd_queue) = 0;
 
-	// ----- POOL -----
+	// ----- BUFFER -----
 
 	enum CommandBufferType {
 		COMMAND_BUFFER_TYPE_PRIMARY,
