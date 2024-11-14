@@ -556,8 +556,6 @@ Error RenderingDevice::buffer_update(RID p_buffer, uint32_t p_offset, uint32_t p
 	return OK;
 }
 
-// <TF>
-// @ShadyTF
 String RenderingDevice::get_perf_report() const {
 	return perf_report_text;
 }
@@ -572,7 +570,7 @@ void RenderingDevice::update_perf_report() {
 	gpu_copy_count = 0;
 	copy_bytes_count = 0;
 }
-// </TF>
+
 Error RenderingDevice::buffer_clear(RID p_buffer, uint32_t p_offset, uint32_t p_size) {
 	ERR_RENDER_THREAD_GUARD_V(ERR_UNAVAILABLE);
 
@@ -2888,28 +2886,19 @@ Vector<uint8_t> RenderingDevice::shader_compile_binary_from_spirv(const Vector<S
 }
 
 RID RenderingDevice::shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, RID p_placeholder) {
-	// <TF>
-	// @ShadyTF
-	// immutable samplers :
-	// expanding api when creating shader to allow passing optionally a set of immutable samplers
-	// keeping existing api but extending it by sending an empty set
+	// Immutable samplers :
+	// Expanding api when creating shader to allow passing optionally a set of immutable samplers
+	// keeping existing api but extending it by sending an empty set.
 	Vector<PipelineImmutableSampler> immutable_samplers;
 	return shader_create_from_bytecode_with_samplers(p_shader_binary, p_placeholder, immutable_samplers);
 }
 
 RID RenderingDevice::shader_create_from_bytecode_with_samplers(const Vector<uint8_t> &p_shader_binary, RID p_placeholder, const Vector<PipelineImmutableSampler> &r_immutable_samplers) {
-	// </TF>
 	_THREAD_SAFE_METHOD_
 
 	ShaderDescription shader_desc;
 	String name;
 
-	// <TF>
-	// @ShadyTF
-	// immutable samplers
-	// passing them to device driver
-	// Was:
-	//  RDD::ShaderID shader_id = driver->shader_create_from_bytecode(p_shader_binary, shader_desc, name, driver_immutable_samplers);
 	Vector<RDD::ImmutableSampler> driver_immutable_samplers;
 	for (int i = 0; i < r_immutable_samplers.size(); i++) {
 		const PipelineImmutableSampler &source_sampler = r_immutable_samplers[i];
@@ -2925,7 +2914,6 @@ RID RenderingDevice::shader_create_from_bytecode_with_samplers(const Vector<uint
 		driver_immutable_samplers.append(driver_sampler);
 	}
 	RDD::ShaderID shader_id = driver->shader_create_from_bytecode(p_shader_binary, shader_desc, name, driver_immutable_samplers);
-	// </TF>
 	ERR_FAIL_COND_V(!shader_id, RID());
 
 	// All good, let's create modules.
@@ -2996,25 +2984,11 @@ RID RenderingDevice::shader_create_from_bytecode_with_samplers(const Vector<uint
 	return id;
 }
 
-// <TF>
-// @ShadyTF unload shader modules
 void RenderingDevice::shader_destroy_modules(RID p_shader) {
 	Shader *shader = shader_owner.get_or_null(p_shader);
 	ERR_FAIL_NULL(shader);
 	driver->shader_destroy_modules(shader->driver_id);
 }
-
-void RenderingDevice::_destroy_all_shader_modules() {
-	List<RID> remaining;
-	shader_owner.get_owned_list(&remaining);
-	if (remaining.size()) {
-		while (remaining.size()) {
-			shader_destroy_modules(remaining.front()->get());
-			remaining.pop_front();
-		}
-	}
-}
-// </TF>
 
 RID RenderingDevice::shader_create_placeholder() {
 	_THREAD_SAFE_METHOD_
@@ -3074,12 +3048,7 @@ void RenderingDevice::_uniform_set_update_shared(UniformSet *p_uniform_set) {
 	}
 }
 
-// @ShadyTF :
-// descriptor optimizations : allow the option to have linearly allocated uniform set pools for frame allocated uniform sets
-// Was:
-//RID RenderingDevice::uniform_set_create(const Vector<Uniform> &p_uniforms, RID p_shader, uint32_t p_shader_set) {
 RID RenderingDevice::uniform_set_create(const Vector<Uniform> &p_uniforms, RID p_shader, uint32_t p_shader_set, bool p_linear_pool) {
-	// </TF>
 	_THREAD_SAFE_METHOD_
 
 	ERR_FAIL_COND_V(p_uniforms.is_empty(), RID());
@@ -3130,12 +3099,8 @@ RID RenderingDevice::uniform_set_create(const Vector<Uniform> &p_uniforms, RID p
 		driver_uniform.type = uniform.uniform_type;
 		driver_uniform.binding = uniform.binding;
 
-		// <TF>
-		// @ShadyTF
-		// immutable samplers
-		// mark immutable samplers to be skipped when creating uniform set
+		// Mark immutable samplers to be skipped when creating uniform set.
 		driver_uniform.immutable_sampler = uniform.immutable_sampler;
-		// </TF>
 
 		switch (uniform.uniform_type) {
 			case UNIFORM_TYPE_SAMPLER: {
@@ -3452,13 +3417,7 @@ RID RenderingDevice::uniform_set_create(const Vector<Uniform> &p_uniforms, RID p
 		}
 	}
 
-	// <TF>
-	// @ShadyTF :
-	// descriptor optimizations : allow the option to have linearly allocated uniform set pools for frame allocated uniform sets
-	// Was:
-	//	RDD::UniformSetID driver_uniform_set = driver->uniform_set_create(driver_uniforms, shader->driver_id, p_shader_set);
 	RDD::UniformSetID driver_uniform_set = driver->uniform_set_create(driver_uniforms, shader->driver_id, p_shader_set, p_linear_pool ? frame : -1);
-	// </TF>
 	ERR_FAIL_COND_V(!driver_uniform_set, RID());
 
 	UniformSet uniform_set;
@@ -6122,9 +6081,7 @@ void RenderingDevice::_begin_frame(bool presented) {
 	}
 
 	if (presented) {
-		// <TF>
 		update_perf_report();
-		// </TF>
 	}
 
 	// Begin recording on the frame's command buffers.

@@ -617,13 +617,7 @@ RID RenderForwardMobile::_setup_render_pass_uniform_set(RenderListType p_render_
 	if (render_pass_uniform_sets[p_index].is_valid() && RD::get_singleton()->uniform_set_is_valid(render_pass_uniform_sets[p_index])) {
 		RD::get_singleton()->free(render_pass_uniform_sets[p_index]);
 	}
-	// <TF>
-	// @ShadyTF :
-	// descriptor optimizations : linear allocation of descriptor set pools
-	// Was:
-	// render_pass_uniform_sets[p_index] = RD::get_singleton()->uniform_set_create(uniforms, scene_shader.default_shader_rd, RENDER_PASS_UNIFORM_SET);
 	render_pass_uniform_sets[p_index] = RD::get_singleton()->uniform_set_create(uniforms, scene_shader.default_shader_rd, RENDER_PASS_UNIFORM_SET, true);
-	// </TF>
 	return render_pass_uniform_sets[p_index];
 }
 
@@ -1787,12 +1781,7 @@ void RenderForwardMobile::_update_render_base_uniform_set() {
 		u.binding = 2;
 		u.uniform_type = RD::UNIFORM_TYPE_SAMPLER;
 		u.append_id(scene_shader.shadow_sampler);
-
-		// <TF>
-		// @ShadyTF
-		// immutable sampler usage case
 		u.immutable_sampler = true;
-		// <TF>
 		uniforms.push_back(u);
 	}
 

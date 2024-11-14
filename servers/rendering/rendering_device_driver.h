@@ -479,19 +479,13 @@ public:
 
 	virtual String shader_get_binary_cache_key() = 0;
 	virtual Vector<uint8_t> shader_compile_binary_from_spirv(VectorView<ShaderStageSPIRVData> p_spirv, const String &p_shader_name) = 0;
-	// <TF>
-	// @ShadyTF
-	// adding support of immutable samplers, which can be embedded when creating the pipeline layout on the condition they remain
-	// valid and unchanged, so they don't need to be specified when creating uniform sets
-	// Was:
-	//virtual ShaderID shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name) = 0;
+
 	struct ImmutableSampler {
 		UniformType type = UNIFORM_TYPE_MAX;
 		uint32_t binding = 0xffffffff; // Binding index as specified in shader.
 		LocalVector<ID> ids;
 	};
 	virtual ShaderID shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name, const Vector<ImmutableSampler> &r_immutableSamplers) = 0;
-	// </TF>
 	// Only meaningful if API_TRAIT_SHADER_CHANGE_INVALIDATION is SHADER_CHANGE_INVALIDATION_ALL_OR_NONE_ACCORDING_TO_LAYOUT_HASH.
 	virtual uint32_t shader_get_layout_hash(ShaderID p_shader) { return 0; }
 	virtual void shader_free(ShaderID p_shader) = 0;
@@ -510,22 +504,13 @@ public:
 		UniformType type = UNIFORM_TYPE_MAX;
 		uint32_t binding = 0xffffffff; // Binding index as specified in shader.
 		LocalVector<ID> ids;
-		// <TF>
-		// @ShadyTF
-		// flag to indicate  that this is an immutable sampler so it is skipped when creating uniform sets, as it would be set previously
-		// when creating the pipeline layout
+		// Flag to indicate  that this is an immutable sampler so it is skipped when creating uniform
+		// sets, as it would be set previously when creating the pipeline layout.
 		bool immutable_sampler = false;
-		// </TF>
 	};
 
-	// <TF>
-	// @ShadyTF :
-	// descriptor optimizations : allow the option to have linearly allocated uniform set pools for frame allocated uniform sets
-	// Was:
-	//  virtual UniformSetID uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index) = 0;
 	virtual UniformSetID uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index, int p_linear_pool_index) = 0;
 	virtual void linear_uniform_set_pools_reset(int p_linear_pool_index) = 0;
-	// </TF>
 	virtual void uniform_set_free(UniformSetID p_uniform_set) = 0;
 
 	// ----- COMMANDS -----
@@ -813,10 +798,7 @@ public:
 	virtual void set_object_name(ObjectType p_type, ID p_driver_id, const String &p_name) = 0;
 	virtual uint64_t get_resource_native_handle(DriverResource p_type, ID p_driver_id) = 0;
 	virtual uint64_t get_total_memory_used() = 0;
-	// <TF>
-	// @ShadyTF lazily allocated memory
 	virtual uint64_t get_lazily_memory_used() = 0;
-	// </TF>
 	virtual uint64_t limit_get(Limit p_limit) = 0;
 	virtual uint64_t api_trait_get(ApiTrait p_trait);
 	virtual bool has_feature(Features p_feature) = 0;

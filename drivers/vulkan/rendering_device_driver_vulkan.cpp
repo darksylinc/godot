@@ -1383,8 +1383,6 @@ Error RenderingDeviceDriverVulkan::initialize(uint32_t p_device_index, uint32_t 
 	physical_device = context_driver->physical_device_get(p_device_index);
 	vkGetPhysicalDeviceProperties(physical_device, &physical_device_properties);
 
-	// <TF>
-	// @ShadyTF
 	// Workaround a driver bug on Adreno 730 GPUs that keeps leaking memory on each call to vkResetDescriptorPool.
 	// Which eventually run out of memory. in such case we should not be using linear allocated pools
 	// Bug introduced in driver 512.597.0 and fixed in 512.671.0
@@ -1394,7 +1392,6 @@ Error RenderingDeviceDriverVulkan::initialize(uint32_t p_device_index, uint32_t 
 		const uint32_t reset_descriptor_pool_fixed_driver_begin = VK_MAKE_VERSION(512u, 671u, 0u);
 		linear_descriptor_pools_enabled = physical_device_properties.driverVersion < reset_descriptor_pool_broken_driver_begin || physical_device_properties.driverVersion > reset_descriptor_pool_fixed_driver_begin;
 	}
-	// </TF>
 	frame_count = p_frame_count;
 
 	// Copy the queue family properties the context already retrieved.
@@ -1744,9 +1741,7 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create(const TextureFormat &
 	VmaAllocationCreateInfo alloc_create_info = {};
 	alloc_create_info.flags = (p_format.usage_bits & TEXTURE_USAGE_CPU_READ_BIT) ? VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT : 0;
 
-	//<TF>
-	//@ShadyTF : lazily allocated buffers
-	if (p_format.usage_bits & TEXTURE_USAGE_LAZILY_ALLOCATED_BIT) {
+	if (p_format.usage_bits & TEXTURE_USAGE_TRANSIENT_BIT) {
 		uint32_t memoryTypeIndex = 0;
 		VmaAllocationCreateInfo lazy_memory_requirements = alloc_create_info;
 		lazy_memory_requirements.usage = VMA_MEMORY_USAGE_GPU_LAZILY_ALLOCATED;
@@ -1765,7 +1760,6 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create(const TextureFormat &
 	} else {
 		alloc_create_info.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 	}
-	//</TF>
 
 	if (image_size <= SMALL_ALLOCATION_MAX_SIZE) {
 		uint32_t mem_type_index = 0;
@@ -3522,14 +3516,8 @@ Vector<uint8_t> RenderingDeviceDriverVulkan::shader_compile_binary_from_spirv(Ve
 
 	return ret;
 }
-// <TF>
-// @ShadyTF
-// adding support of immutable samplers, which can be embedded when creating the pipeline layout on the condition they remain
-// valid and unchanged, so they don't need to be specified when creating uniform sets
-// Was:
-//RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name) {
+
 RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vector<uint8_t> &p_shader_binary, ShaderDescription &r_shader_desc, String &r_name, const Vector<ImmutableSampler> &r_immutableSamplers) {
-	// </TF>
 	r_shader_desc = {}; // Driver-agnostic.
 	ShaderInfo shader_info; // Driver-specific.
 
@@ -3601,9 +3589,7 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 				case UNIFORM_TYPE_SAMPLER: {
 					layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
 					layout_binding.descriptorCount = set_ptr[j].length;
-					// <TF>
-					// @ShadyTF
-					// Immutable samplers : here they get set in the layoutbinding, given that  they will not be changed later
+					// Immutable samplers: here they get set in the layoutbinding, given that they will not be changed later.
 					int immutable_bind_index = -1;
 					if (immutable_samplers_enabled && r_immutableSamplers.size() > 0) {
 						for (int k = 0; k < r_immutableSamplers.size(); k++) {
@@ -3616,7 +3602,6 @@ RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_bytecode(const Vec
 							layout_binding.pImmutableSamplers = (VkSampler *)&r_immutableSamplers[immutable_bind_index].ids[0].id;
 						}
 					}
-					// </TF>
 				} break;
 				case UNIFORM_TYPE_SAMPLER_WITH_TEXTURE: {
 					layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -3838,16 +3823,9 @@ void RenderingDeviceDriverVulkan::shader_destroy_modules(ShaderID p_shader) {
 /*********************/
 /**** UNIFORM SET ****/
 /*********************/
-// <TF>
-// @ShadyTF :
-// descriptor optimizations : linear allocation of descriptor set pools
-// Was:
-// VkDescriptorPool RenderingDeviceDriverVulkan::_descriptor_set_pool_find_or_create(const DescriptorSetPoolKey &p_key, DescriptorSetPools::Iterator *r_pool_sets_it) {
-// DescriptorSetPools::Iterator pool_sets_it = descriptor_set_pools.find(p_key);
 VkDescriptorPool RenderingDeviceDriverVulkan::_descriptor_set_pool_find_or_create(const DescriptorSetPoolKey &p_key, DescriptorSetPools::Iterator *r_pool_sets_it, int p_linear_pool_index) {
 	bool linear_pool = p_linear_pool_index >= 0;
 	DescriptorSetPools::Iterator pool_sets_it = linear_pool ? linear_descriptor_set_pools[p_linear_pool_index].find(p_key) : descriptor_set_pools.find(p_key);
-	// </TF>
 
 	if (pool_sets_it) {
 		for (KeyValue<VkDescriptorPool, uint32_t> &E : pool_sets_it->value) {
@@ -3933,17 +3911,11 @@ VkDescriptorPool RenderingDeviceDriverVulkan::_descriptor_set_pool_find_or_creat
 
 	VkDescriptorPoolCreateInfo descriptor_set_pool_create_info = {};
 	descriptor_set_pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-	// <TF>
-	// @ShadyTF :
-	// descriptor optimizations : linear allocation of descriptor set pools
-	// Was :
-	// descriptor_set_pool_create_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT; // Can't think how somebody may NOT need this flag.
 	if (linear_descriptor_pools_enabled && linear_pool) {
 		descriptor_set_pool_create_info.flags = 0;
 	} else {
 		descriptor_set_pool_create_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT; // Can't think how somebody may NOT need this flag.
 	}
-	// </TF>
 	descriptor_set_pool_create_info.maxSets = max_descriptor_sets_per_pool;
 	descriptor_set_pool_create_info.poolSizeCount = vk_sizes_count;
 	descriptor_set_pool_create_info.pPoolSizes = vk_sizes;
@@ -3957,17 +3929,11 @@ VkDescriptorPool RenderingDeviceDriverVulkan::_descriptor_set_pool_find_or_creat
 	// Bookkeep.
 
 	if (!pool_sets_it) {
-		// <TF>
-		// @ShadyTF :
-		// descriptor optimizations : linear allocation of descriptor set pools
-		// Was:
-		// pool_sets_it = descriptor_set_pools.insert(p_key, HashMap<VkDescriptorPool, uint32_t>());
 		if (linear_pool) {
 			pool_sets_it = linear_descriptor_set_pools[p_linear_pool_index].insert(p_key, HashMap<VkDescriptorPool, uint32_t>());
 		} else {
 			pool_sets_it = descriptor_set_pools.insert(p_key, HashMap<VkDescriptorPool, uint32_t>());
 		}
-		// </TF>
 	}
 	HashMap<VkDescriptorPool, uint32_t> &pool_rcs = pool_sets_it->value;
 	pool_rcs.insert(vk_pool, 0);
@@ -3975,23 +3941,13 @@ VkDescriptorPool RenderingDeviceDriverVulkan::_descriptor_set_pool_find_or_creat
 	return vk_pool;
 }
 
-// <TF>
-// @ShadyTF :
-// descriptor optimizations : linear allocation of descriptor set pools
-// Was :
-//void RenderingDeviceDriverVulkan::_descriptor_set_pool_unreference(DescriptorSetPools::Iterator p_pool_sets_it, VkDescriptorPool p_vk_descriptor_pool) {
 void RenderingDeviceDriverVulkan::_descriptor_set_pool_unreference(DescriptorSetPools::Iterator p_pool_sets_it, VkDescriptorPool p_vk_descriptor_pool, int p_linear_pool_index) {
-	// </TF>
 	HashMap<VkDescriptorPool, uint32_t>::Iterator pool_rcs_it = p_pool_sets_it->value.find(p_vk_descriptor_pool);
 	pool_rcs_it->value--;
 	if (pool_rcs_it->value == 0) {
 		vkDestroyDescriptorPool(vk_device, p_vk_descriptor_pool, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DESCRIPTOR_POOL));
 		p_pool_sets_it->value.erase(p_vk_descriptor_pool);
 		if (p_pool_sets_it->value.is_empty()) {
-			// <TF>
-			// @ShadyTF :
-			// descriptor optimizations : linear allocation of descriptor set pools
-			// Was:		descriptor_set_pools.remove(p_pool_sets_it);
 			if (linear_descriptor_pools_enabled && p_linear_pool_index >= 0) {
 				linear_descriptor_set_pools[p_linear_pool_index].remove(p_pool_sets_it);
 			} else {
@@ -4001,32 +3957,17 @@ void RenderingDeviceDriverVulkan::_descriptor_set_pool_unreference(DescriptorSet
 	}
 }
 
-// <TF>
-// @ShadyTF :
-// descriptor optimizations : linear allocation of descriptor set pools
-// Was:
-//RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index) {
 RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index, int p_linear_pool_index) {
 	if (!linear_descriptor_pools_enabled) {
 		p_linear_pool_index = -1;
 	}
-	// </TF>
 	DescriptorSetPoolKey pool_key;
-	// <TF>
-	// @ShadyTF :
-	// immutable samplers :
-	// as immutable samplers will be skipped we need to track the number of vk_writes used
-	// Was :
-	//	VkWriteDescriptorSet *vk_writes = ALLOCA_ARRAY(VkWriteDescriptorSet, p_uniforms.size());
-	//	for (uint32_t i = 0; i < p_uniforms.size(); i++) {
-	//		const BoundUniform &uniform = p_uniforms[i];
-
+	// Immutable samplers will be skipped so we need to track the number of vk_writes used.
 	VkWriteDescriptorSet *vk_writes = ALLOCA_ARRAY(VkWriteDescriptorSet, p_uniforms.size());
 	uint32_t writes_amount = 0;
 	for (uint32_t i = 0; i < p_uniforms.size(); i++) {
 		const BoundUniform &uniform = p_uniforms[i];
 
-		// </TF>
 		vk_writes[writes_amount] = {};
 		vk_writes[writes_amount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 
@@ -4034,14 +3975,9 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 
 		switch (uniform.type) {
 			case UNIFORM_TYPE_SAMPLER: {
-				// <TF>
-				// @ShadyTF :
-				// immutable samplers :
-				// skipping immutable samplers.
 				if (uniform.immutable_sampler && immutable_samplers_enabled) {
-					continue;
+					continue; // Skipping immutable samplers.
 				}
-				// <TF>
 				num_descriptors = uniform.ids.size();
 				VkDescriptorImageInfo *vk_img_infos = ALLOCA_ARRAY(VkDescriptorImageInfo, num_descriptors);
 
@@ -4188,13 +4124,7 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 
 	// Need a descriptor pool.
 	DescriptorSetPools::Iterator pool_sets_it = {};
-	// <TF>
-	// @ShadyTF :
-	// descriptor optimizations : linear allocation of descriptor set pools
-	// Was:
-	// VkDescriptorPool vk_pool = _descriptor_set_pool_find_or_create(pool_key, &pool_sets_it);
 	VkDescriptorPool vk_pool = _descriptor_set_pool_find_or_create(pool_key, &pool_sets_it, p_linear_pool_index);
-	// </TF>
 	DEV_ASSERT(vk_pool);
 	pool_sets_it->value[vk_pool]++;
 
@@ -4209,48 +4139,24 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 
 	VkResult res = vkAllocateDescriptorSets(vk_device, &descriptor_set_allocate_info, &vk_descriptor_set);
 	if (res) {
-		// <TF>
-		// @ShadyTF :
-		// descriptor optimizations : linear allocation of descriptor set pools
-		// Was:
-		// _descriptor_set_pool_unreference(pool_sets_it, vk_pool);
 		_descriptor_set_pool_unreference(pool_sets_it, vk_pool, p_linear_pool_index);
-		// </TF>
 		ERR_FAIL_V_MSG(UniformSetID(), "Cannot allocate descriptor sets, error " + itos(res) + ".");
 	}
-
-	// <TF>
-	// @ShadyTF :
-	// immutable samplers :
-	// using number of vk_writes after skipping ummutable samplers
-	// Was:
-	//	for (uint32_t i = 0; i < p_uniforms.size(); i++) {
-	//		vk_writes[i].dstSet = vk_descriptor_set;
-	//	}
-	//	vkUpdateDescriptorSets(vk_device, p_uniforms.size(), vk_writes, 0, nullptr);
 
 	for (uint32_t i = 0; i < writes_amount; i++) {
 		vk_writes[i].dstSet = vk_descriptor_set;
 	}
 	vkUpdateDescriptorSets(vk_device, writes_amount, vk_writes, 0, nullptr);
-	// </TF>
 
 	// Bookkeep.
 
 	UniformSetInfo *usi = VersatileResource::allocate<UniformSetInfo>(resources_allocator);
 	usi->vk_descriptor_set = vk_descriptor_set;
-	// <TF>
-	// @ShadyTF :
-	// descriptor optimizations : linear allocation of descriptor set pools
-	// Was:
-	// usi->vk_descriptor_pool = vk_pool;
 	if (p_linear_pool_index >= 0) {
 		usi->vk_linear_descriptor_pool = vk_pool;
 	} else {
 		usi->vk_descriptor_pool = vk_pool;
 	}
-	// </TF>
-
 	usi->pool_sets_it = pool_sets_it;
 
 	return UniformSetID(usi);
@@ -4259,18 +4165,12 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 void RenderingDeviceDriverVulkan::uniform_set_free(UniformSetID p_uniform_set) {
 	UniformSetInfo *usi = (UniformSetInfo *)p_uniform_set.id;
 
-	// <TF>
-	// @ShadyTF :
-	// descriptor optimizations : linear allocation of descriptor set pools
-	// Was :
-	// vkFreeDescriptorSets(vk_device, usi->vk_descriptor_pool, 1, &usi->vk_descriptor_set);
-	// _descriptor_set_pool_unreference(usi->pool_sets_it, usi->vk_descriptor_pool);
 	if (usi->vk_linear_descriptor_pool) {
+		// Nothing to do since the pool gets reset altogether.
 	} else {
 		vkFreeDescriptorSets(vk_device, usi->vk_descriptor_pool, 1, &usi->vk_descriptor_set);
 		_descriptor_set_pool_unreference(usi->pool_sets_it, usi->vk_descriptor_pool, -1);
 	}
-	// </TF>
 
 	VersatileResource::free(resources_allocator, usi);
 }
@@ -5785,12 +5685,9 @@ uint64_t RenderingDeviceDriverVulkan::get_total_memory_used() {
 	return stats.total.statistics.allocationBytes;
 }
 
-// <TF>
-// @ShadyTF lazily allocated memory
 uint64_t RenderingDeviceDriverVulkan::get_lazily_memory_used() {
 	return vmaCalculateLazilyAllocatedBytes(allocator);
 }
-// </TF>
 
 uint64_t RenderingDeviceDriverVulkan::limit_get(Limit p_limit) {
 	const VkPhysicalDeviceLimits &limits = physical_device_properties.limits;

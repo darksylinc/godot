@@ -171,9 +171,7 @@ void RenderSceneBuffersRD::configure(const RenderSceneBuffersConfiguration *p_co
 	const bool resolve_target = msaa_3d != RS::VIEWPORT_MSAA_DISABLED;
 	create_texture(RB_SCOPE_BUFFERS, RB_TEX_COLOR, base_data_format, get_color_usage_bits(resolve_target, false, can_be_storage));
 
-	//@ShadyTF : lazily allocated buffers
-	const uint32_t extra_bits = RD::TEXTURE_USAGE_LAZILY_ALLOCATED_BIT;
-	//</TF>
+	const uint32_t extra_bits = RD::TEXTURE_USAGE_TRANSIENT_BIT;
 
 	// Create our depth buffer.
 	create_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH, get_depth_format(resolve_target, false, can_be_storage), get_depth_usage_bits(resolve_target, false, can_be_storage) | extra_bits);
