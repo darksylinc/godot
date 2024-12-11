@@ -195,6 +195,10 @@ public:
 			uint64_t size = UINT64_MAX;
 		} allocation;
 		uint64_t size = 0;
+		// <TF>
+		// persistent mapped address
+		uint8_t *mapped_address = VK_NULL_HANDLE;
+		// </TF>
 		VkBufferView vk_view = VK_NULL_HANDLE; // For texel buffers.
 	};
 

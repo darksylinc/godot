@@ -473,14 +473,14 @@ Error RenderingDevice::buffer_copy(RID p_src_buffer, RID p_dst_buffer, uint32_t 
 	return OK;
 }
 
-Error RenderingDevice::buffer_update(RID p_buffer, uint32_t p_offset, uint32_t p_size, const void *p_data) {
+Error RenderingDevice::buffer_update(RID p_buffer, uint32_t p_offset, uint32_t p_size, const void *p_data, const bool p_skip_check) {
 	ERR_RENDER_THREAD_GUARD_V(ERR_UNAVAILABLE);
 
 	copy_bytes_count += p_size;
 
-	ERR_FAIL_COND_V_MSG(draw_list, ERR_INVALID_PARAMETER,
+	ERR_FAIL_COND_V_MSG(draw_list && !p_skip_check, ERR_INVALID_PARAMETER,
 			"Updating buffers is forbidden during creation of a draw list");
-	ERR_FAIL_COND_V_MSG(compute_list, ERR_INVALID_PARAMETER,
+	ERR_FAIL_COND_V_MSG(compute_list && !p_skip_check, ERR_INVALID_PARAMETER,
 			"Updating buffers is forbidden during creation of a compute list");
 
 	Buffer *buffer = _get_buffer_from_owner(p_buffer);
@@ -5784,6 +5784,8 @@ void RenderingDevice::_free_internal(RID p_id) {
 		RDG::resource_tracker_free(uniform_buffer->draw_tracker);
 		frames[frame].buffers_to_dispose_of.push_back(*uniform_buffer);
 		uniform_buffer_owner.free(p_id);
+		// <TF>
+		// @ShadyTF linear buffers
 	} else if (texture_buffer_owner.owns(p_id)) {
 		Buffer *texture_buffer = texture_buffer_owner.get_or_null(p_id);
 		_check_transfer_worker_buffer(texture_buffer);
@@ -6034,6 +6036,10 @@ void RenderingDevice::_free_pending_resources(int p_frame) {
 
 uint32_t RenderingDevice::get_frame_delay() const {
 	return frames.size();
+}
+
+uint32_t RenderingDevice::get_current_frame_index() const {
+	return frame;
 }
 
 uint64_t RenderingDevice::get_memory_usage(MemoryType p_type) const {
@@ -6590,6 +6596,8 @@ uint64_t RenderingDevice::get_driver_resource(DriverResource p_resource, RID p_r
 				buffer = index_buffer_owner.get_or_null(p_rid);
 			} else if (uniform_buffer_owner.owns(p_rid)) {
 				buffer = uniform_buffer_owner.get_or_null(p_rid);
+				// <TF>
+				// @ShadyTF linear buffers
 			} else if (texture_buffer_owner.owns(p_rid)) {
 				buffer = texture_buffer_owner.get_or_null(p_rid);
 			} else if (storage_buffer_owner.owns(p_rid)) {
