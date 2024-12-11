@@ -155,7 +155,7 @@ private:
 
 	void _render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier = 0, float p_screen_mesh_lod_threshold = 0.0, bool p_open_pass = true, bool p_close_pass = true, bool p_clear_region = true, RenderingMethod::RenderInfo *p_render_info = nullptr, const Transform3D &p_main_cam_transform = Transform3D());
 	void _render_shadow_begin();
-	void _render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, const Rect2i &p_rect = Rect2i(), bool p_flip_y = false, bool p_clear_region = true, bool p_begin = true, bool p_end = true, RenderingMethod::RenderInfo *p_render_info = nullptr, const Transform3D &p_main_cam_transform = Transform3D());
+	void _render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, RS::LightType p_light_type, float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, const Rect2i &p_rect = Rect2i(), bool p_flip_y = false, bool p_clear_region = true, bool p_begin = true, bool p_end = true, RenderingMethod::RenderInfo *p_render_info = nullptr, const Transform3D &p_main_cam_transform = Transform3D());
 	void _render_shadow_process();
 	void _render_shadow_end();
 
@@ -259,6 +259,8 @@ private:
 			RID framebuffer;
 			Rect2i rect;
 			bool clear_depth;
+
+			RS::LightType light_type;
 		};
 
 		LocalVector<ShadowPass> shadow_passes;
@@ -300,10 +302,13 @@ private:
 			}
 		};
 
-		void sort_by_depth() { //used for shadows
+		void sort_by_depth(uint32_t p_from = 0, uint32_t p_size = 0) { //used for shadows
 
 			SortArray<GeometryInstanceSurfaceDataCache *, SortByDepth> sorter;
-			sorter.sort(elements.ptr(), elements.size());
+			if (p_from == 0 && p_size == 0)
+				sorter.sort(elements.ptr(), elements.size());
+			else
+				sorter.sort(elements.ptr() + p_from, p_size);
 		}
 
 		struct SortByReverseDepthAndPriority {
@@ -316,6 +321,41 @@ private:
 
 			SortArray<GeometryInstanceSurfaceDataCache *, SortByReverseDepthAndPriority> sorter;
 			sorter.sort(elements.ptr(), elements.size());
+		}
+
+		struct SortForRendering {
+			_FORCE_INLINE_ bool operator()(const GeometryInstanceSurfaceDataCache *A, const GeometryInstanceSurfaceDataCache *B) const {
+				if (A->sort.shader_id == B->sort.shader_id) {
+					if (A->sort.format == B->sort.format) {
+						return (A->sort.spec_consts == B->sort.spec_consts) ? (A->owner->depth < B->owner->depth) : (A->sort.spec_consts < B->sort.spec_consts);
+					} else {
+						return A->sort.format < B->sort.format;
+					}
+				}
+				return (A->sort.shader_id < B->sort.shader_id);
+			}
+		};
+
+		void sort_for_rendering(uint32_t p_from = 0, uint32_t p_size = 0) {
+			SortArray<GeometryInstanceSurfaceDataCache *, SortForRendering> sorter;
+			if (p_from == 0 && p_size == 0)
+				sorter.sort(elements.ptr(), elements.size());
+			else
+				sorter.sort(elements.ptr() + p_from, p_size);
+		}
+
+		struct SortForShadows {
+			_FORCE_INLINE_ bool operator()(const GeometryInstanceSurfaceDataCache *A, const GeometryInstanceSurfaceDataCache *B) const {
+				return (A->sort.shader_id == B->sort.shader_id) ? (A->owner->depth < B->owner->depth) : (A->sort.shader_id < B->sort.shader_id);
+			}
+		};
+
+		void sort_for_shadows(uint32_t p_from = 0, uint32_t p_size = 0) {
+			SortArray<GeometryInstanceSurfaceDataCache *, SortForShadows> sorter;
+			if (p_from == 0 && p_size == 0)
+				sorter.sort(elements.ptr(), elements.size());
+			else
+				sorter.sort(elements.ptr() + p_from, p_size);
 		}
 
 		_FORCE_INLINE_ void add_element(GeometryInstanceSurfaceDataCache *p_element) {
@@ -410,6 +450,8 @@ protected:
 				uint64_t uses_lightmap : 4; // sort by lightmap id here, not whether its yes/no (is 4 bits enough?)
 				uint64_t depth_layer : 4;
 				uint64_t priority : 8;
+				uint64_t format;
+				uint64_t spec_consts : 32;
 
 				// uint64_t lod_index : 8; // no need to sort on LOD
 				// uint64_t uses_forward_gi : 1; // no GI here, remove
