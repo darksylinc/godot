@@ -202,6 +202,7 @@ private:
 	// swapchain semaphore to be signaled (which causes bubbles).
 	bool split_swapchain_into_its_own_cmd_buffer = true;
 	uint32_t gpu_copy_count = 0;
+	uint32_t direct_copy_count = 0;
 	uint32_t copy_bytes_count = 0;
 	String perf_report_text;
 
@@ -932,15 +933,19 @@ public:
 
 	enum StorageBufferUsage {
 		STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT = (1 << 0),
-		STORAGE_BUFFER_USAGE_DEVICE_ADDRESS = (1 << 1),
 	};
 
 	/*****************/
 	/**** BUFFERS ****/
 	/*****************/
 
-	RID uniform_buffer_create(uint32_t p_size_bytes, const Vector<uint8_t> &p_data = Vector<uint8_t>(), bool p_enable_device_address = false);
-	RID storage_buffer_create(uint32_t p_size, const Vector<uint8_t> &p_data = Vector<uint8_t>(), BitField<StorageBufferUsage> p_usage = 0);
+	enum BufferCreationBits {
+		BUFFER_CREATION_DEVICE_ADDRESS_BIT = (1 << 0),
+		BUFFER_CREATION_DYNAMIC_PERSISTENT_BIT = (1 << 1),
+	};
+
+	RID uniform_buffer_create(uint32_t p_size_bytes, const Vector<uint8_t> &p_data = Vector<uint8_t>(), BitField<BufferCreationBits> p_creation_bits = 0);
+	RID storage_buffer_create(uint32_t p_size, const Vector<uint8_t> &p_data = Vector<uint8_t>(), BitField<StorageBufferUsage> p_usage = 0, BitField<BufferCreationBits> p_creation_bits = 0);
 
 	RID texture_buffer_create(uint32_t p_size_elements, DataFormat p_format, const Vector<uint8_t> &p_data = Vector<uint8_t>());
 
@@ -1010,7 +1015,7 @@ public:
 	};
 
 	typedef Uniform PipelineImmutableSampler;
-	RID shader_create_from_bytecode_with_samplers(const Vector<uint8_t> &p_shader_binary, RID p_placeholder = RID(), const Vector<PipelineImmutableSampler> &p_immutable_samplers = Vector<PipelineImmutableSampler>());
+	RID shader_create_from_bytecode_with_samplers(const Vector<uint8_t> &p_shader_binary, RID p_placeholder = RID(), const Vector<PipelineImmutableSampler> &p_immutable_samplers = Vector<PipelineImmutableSampler>(), const Vector<uint64_t> &p_dynamic_buffers = LocalVector<uint64_t>());
 
 private:
 	static const uint32_t MAX_UNIFORM_SETS = 16;
@@ -1684,6 +1689,7 @@ VARIANT_ENUM_CAST(RenderingDevice::SamplerBorderColor)
 VARIANT_ENUM_CAST(RenderingDevice::VertexFrequency)
 VARIANT_ENUM_CAST(RenderingDevice::IndexBufferFormat)
 VARIANT_BITFIELD_CAST(RenderingDevice::StorageBufferUsage)
+VARIANT_BITFIELD_CAST(RenderingDevice::BufferCreationBits)
 VARIANT_ENUM_CAST(RenderingDevice::UniformType)
 VARIANT_ENUM_CAST(RenderingDevice::RenderPrimitive)
 VARIANT_ENUM_CAST(RenderingDevice::PolygonCullMode)

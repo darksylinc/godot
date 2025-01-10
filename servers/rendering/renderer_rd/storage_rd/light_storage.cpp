@@ -584,17 +584,17 @@ void LightStorage::set_max_lights(const uint32_t p_max_lights) {
 
 	uint32_t light_buffer_size = max_lights * sizeof(LightData);
 	omni_lights = memnew_arr(LightData, max_lights);
-	omni_light_buffer = RD::get_singleton()->storage_buffer_create(light_buffer_size);
+	omni_light_buffer = RD::get_singleton()->storage_buffer_create(light_buffer_size, Vector<uint8_t>(), 0, RD::BUFFER_CREATION_DYNAMIC_PERSISTENT_BIT);
 	omni_light_sort = memnew_arr(LightInstanceDepthSort, max_lights);
 	spot_lights = memnew_arr(LightData, max_lights);
-	spot_light_buffer = RD::get_singleton()->storage_buffer_create(light_buffer_size);
+	spot_light_buffer = RD::get_singleton()->storage_buffer_create(light_buffer_size, Vector<uint8_t>(), 0, RD::BUFFER_CREATION_DYNAMIC_PERSISTENT_BIT);
 	spot_light_sort = memnew_arr(LightInstanceDepthSort, max_lights);
 	//defines += "\n#define MAX_LIGHT_DATA_STRUCTS " + itos(max_lights) + "\n";
 
 	max_directional_lights = RendererSceneRender::MAX_DIRECTIONAL_LIGHTS;
 	uint32_t directional_light_buffer_size = max_directional_lights * sizeof(DirectionalLightData);
 	directional_lights = memnew_arr(DirectionalLightData, max_directional_lights);
-	directional_light_buffer = RD::get_singleton()->uniform_buffer_create(directional_light_buffer_size);
+	directional_light_buffer = RD::get_singleton()->uniform_buffer_create(directional_light_buffer_size, Vector<uint8_t>(), RD::BUFFER_CREATION_DYNAMIC_PERSISTENT_BIT);
 }
 
 void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const PagedArray<RID> &p_lights, const Transform3D &p_camera_transform, RID p_shadow_atlas, bool p_using_shadows, uint32_t &r_directional_light_count, uint32_t &r_positional_light_count, bool &r_directional_light_soft_shadows) {
