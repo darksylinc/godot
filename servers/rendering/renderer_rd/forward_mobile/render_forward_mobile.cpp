@@ -409,7 +409,7 @@ RID RenderForwardMobile::_setup_render_pass_uniform_set(RenderListType p_render_
 	{
 		RD::Uniform u;
 		u.binding = 0;
-		u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
+		u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC;
 		u.append_id(scene_state.uniform_buffers[p_index]);
 		uniforms.push_back(u);
 	}
@@ -845,6 +845,7 @@ void RenderForwardMobile::_render_scene(RenderDataRD *p_render_data, const Color
 	_fill_render_list(RENDER_LIST_OPAQUE, p_render_data, PASS_MODE_COLOR);
 	render_list[RENDER_LIST_OPAQUE].sort_by_key();
 	render_list[RENDER_LIST_ALPHA].sort_by_reverse_depth_and_priority();
+
 	_fill_instance_data(RENDER_LIST_OPAQUE);
 	_fill_instance_data(RENDER_LIST_ALPHA);
 
@@ -1099,6 +1100,16 @@ void RenderForwardMobile::_render_scene(RenderDataRD *p_render_data, const Color
 			}
 		}
 
+		// <TF>
+		// @ShadyTF
+		// replacing push constants with uniform buffer
+		if (draw_sky || draw_sky_fog_only) {
+			sky.draw_sky_prepare_params(p_render_data->environment, time, sky_luminance_multiplier, sky_brightness_multiplier);
+		}
+		if (!is_reflection_probe) {
+			_post_process_prepare_params(p_render_data->render_buffers->get_internal_texture(), p_render_data);
+		}
+		// </TF>
 		RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(framebuffer, load_color ? RD::DRAW_CLEAR_DEPTH : (RD::DRAW_CLEAR_COLOR_0 | RD::DRAW_CLEAR_DEPTH), c, 0.0f, 0, p_render_data->render_region, breadcrumb);
 		RD::FramebufferFormatID fb_format = RD::get_singleton()->framebuffer_get_format(framebuffer);
 
@@ -3197,6 +3208,11 @@ RenderForwardMobile::RenderForwardMobile() {
 
 	sky.set_texture_format(_render_buffers_get_color_format());
 
+	// <TF>
+	// @ShadyTF
+	// replacing push constants with uniform buffer
+	sky.use_push_constants = false;
+	// </TF>
 	String defines;
 
 	defines += "\n#define MAX_ROUGHNESS_LOD " + itos(get_roughness_layers() - 1) + ".0\n";
