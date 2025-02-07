@@ -33,6 +33,9 @@
 
 #include "servers/rendering_server.h"
 
+#define ERR_PC_RENDER_THREAD_MSG String("This function (") + String(__func__) + String(") can only be called from the render thread. ")
+#define ERR_PC_RENDER_THREAD_GUARD() ERR_FAIL_COND_MSG(render_thread_id != Thread::get_caller_id(), ERR_PC_RENDER_THREAD_MSG);
+
 namespace RendererRD {
 
 template <typename T, uint32_t set_idx = 2u>
@@ -42,12 +45,12 @@ struct PushConstantsEmu {
 		RID set;
 	};
 
+private:
 	RID shader;
 
 	LocalVector<ParamsUniform> params_uniform;
 	uint32_t curr_idx = 0u;
 
-private:
 	void push() {
 		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
 
@@ -67,8 +70,23 @@ private:
 	}
 
 public:
+#ifdef DEV_ENABLED
 	~PushConstantsEmu() {
+		DEV_ASSERT(shader.is_null());
+	}
+#endif
+
+	void init(RID p_shader) {
+		shader = p_shader;
 		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
+		rd->_register_push_constant_emu(&this->curr_idx);
+	}
+
+	void uninit() {
+		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
+
+		rd->_unregister_push_constant_emu(&this->curr_idx);
+
 		for (const ParamsUniform &pu : params_uniform) {
 			if (pu.set.is_valid()) {
 				rd->free(pu.set);
@@ -77,6 +95,12 @@ public:
 				rd->free(pu.buffer);
 			}
 		}
+
+		shader = RID();
+	}
+
+	void _reset() {
+		curr_idx = 0u;
 	}
 
 	ParamsUniform upload_and_advance(const T &p_src_data) {

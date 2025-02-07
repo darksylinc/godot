@@ -80,7 +80,7 @@ CopyEffects::CopyEffects(bool p_prefer_raster_effects) {
 	// replace push constants with UBO
 	// prepare uniform set and buffer
 	{
-		blur_raster.push_constant.shader = blur_raster.shader.version_get_shader(blur_raster.shader_version, 0);
+		blur_raster.push_constant.init(blur_raster.shader.version_get_shader(blur_raster.shader_version, 0));
 	}
 	// </TF>
 
@@ -116,7 +116,7 @@ CopyEffects::CopyEffects(bool p_prefer_raster_effects) {
 		// @ShadyTF
 		// replace push constants with UBO
 		// prepare uniform set and buffer
-		copy.push_constant.shader = copy.shader.version_get_shader(copy.shader_version, 0);
+		copy.push_constant.init(copy.shader.version_get_shader(copy.shader_version, 0));
 		// </TF>
 	}
 
@@ -155,7 +155,7 @@ CopyEffects::CopyEffects(bool p_prefer_raster_effects) {
 		// @ShadyTF
 		// replace push constants with UBO
 		// prepare uniform set and buffer
-		copy_to_fb.push_constant.shader = copy_to_fb.shader.version_get_shader(copy_to_fb.shader_version, 0);
+		copy_to_fb.push_constant.init(copy_to_fb.shader.version_get_shader(copy_to_fb.shader_version, 0));
 		// </TF>
 	}
 
@@ -180,7 +180,7 @@ CopyEffects::CopyEffects(bool p_prefer_raster_effects) {
 		// <TF>
 		// @ShadyTF
 		// prepare uniform set and buffer
-		cube_to_dp.push_constant.shader = cube_to_dp.shader.version_get_shader(cube_to_dp.shader_version, 0);
+		cube_to_dp.push_constant.init(cube_to_dp.shader.version_get_shader(cube_to_dp.shader_version, 0));
 		// </TF>
 	}
 
@@ -344,6 +344,11 @@ CopyEffects::CopyEffects(bool p_prefer_raster_effects) {
 }
 
 CopyEffects::~CopyEffects() {
+	copy_to_fb.push_constant.uninit();
+	cube_to_dp.push_constant.uninit();
+	copy.push_constant.uninit();
+	blur_raster.push_constant.uninit();
+
 	if (prefer_raster_effects) {
 		blur_raster.shader.version_free(blur_raster.shader_version);
 		cubemap_downsampler.raster_shader.version_free(cubemap_downsampler.shader_version);

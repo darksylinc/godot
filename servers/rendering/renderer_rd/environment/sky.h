@@ -193,7 +193,6 @@ public:
 		// <TF>
 		// @ShadyTF
 		// replacing push constants with uniform buffer
-		SkyPushConstant params;
 		LocalVector<RID> params_uniform_buffer;
 		uint32_t curr_params_idx = UINT32_MAX;
 		// </TF>

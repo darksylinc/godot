@@ -6388,6 +6388,10 @@ void RenderingDevice::_begin_frame(bool p_presented) {
 		driver->linear_uniform_set_pools_reset(frame);
 	}
 
+	for (uint32_t *idx : registered_push_constant_emus) {
+		*idx = 0u;
+	}
+
 	// Begin recording on the frame's command buffers.
 	driver->begin_segment(frame, frames_drawn++);
 	driver->command_buffer_begin(frames[frame].command_buffer);
@@ -6623,6 +6627,16 @@ void RenderingDevice::_flush_and_stall_for_all_frames() {
 	_end_frame();
 	_execute_frame(false);
 	_begin_frame();
+}
+
+void RenderingDevice::_register_push_constant_emu(uint32_t *idx_ptr) {
+	ERR_RENDER_THREAD_GUARD();
+	registered_push_constant_emus.insert(idx_ptr);
+}
+
+void RenderingDevice::_unregister_push_constant_emu(uint32_t *idx_ptr) {
+	ERR_RENDER_THREAD_GUARD();
+	registered_push_constant_emus.remove(registered_push_constant_emus.find(idx_ptr));
 }
 
 Error RenderingDevice::initialize(RenderingContextDriver *p_context, DisplayServer::WindowID p_main_window) {
