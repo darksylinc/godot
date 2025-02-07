@@ -213,7 +213,58 @@ static _FORCE_INLINE_ void store_transform_3x3(const Basis &p_basis, float *p_ar
 // <TF>
 // @ShadyTF
 // replacing push constants with uniform buffer
+void SkyRD::create_uniform_buffer() {
+	if (sky_scene_state.curr_params_idx < sky_scene_state.params_uniform_buffer.size()) {
+		return;
+	}
+
+	Vector<RD::Uniform> uniforms;
+
+	RID params_uniform_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SkyPushConstant), Vector<uint8_t>(), RD::BUFFER_CREATION_DYNAMIC_PERSISTENT_BIT);
+	sky_scene_state.params_uniform_buffer.push_back(params_uniform_buffer);
+
+	{
+		RD::Uniform u;
+		u.binding = 0;
+		u.append_id(params_uniform_buffer);
+		u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC;
+		uniforms.push_back(u);
+	}
+
+	{
+		RD::Uniform u;
+		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		u.binding = 1;
+		u.append_id(RendererRD::MaterialStorage::get_singleton()->global_shader_uniforms_get_storage_buffer());
+		uniforms.push_back(u);
+	}
+
+	{
+		RD::Uniform u;
+		u.binding = 2;
+		u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
+		u.append_id(sky_scene_state.uniform_buffer);
+		uniforms.push_back(u);
+	}
+
+	{
+		RD::Uniform u;
+		u.binding = 3;
+		u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
+		u.append_id(sky_scene_state.directional_light_buffer);
+		uniforms.push_back(u);
+	}
+
+	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
+	material_storage->samplers_rd_get_default().append_uniforms(uniforms, SAMPLERS_BINDING_FIRST_INDEX);
+
+	RID uniform_set = RD::get_singleton()->uniform_set_create(uniforms, sky_shader.default_shader_rd, SKY_SET_UNIFORMS);
+	sky_scene_state.uniform_set.push_back(uniform_set);
+}
+
 void SkyRD::_render_sky_prepare_params(float p_time, const Projection &p_projection, const Basis &p_orientation, const Vector3 &p_position, float p_luminance_multiplier, float p_brightness_multiplier) {
+	create_uniform_buffer();
+
 	SkyPushConstant sky_push_constant;
 
 	memset(&sky_push_constant, 0, sizeof(SkyPushConstant));
@@ -232,7 +283,7 @@ void SkyRD::_render_sky_prepare_params(float p_time, const Projection &p_project
 	sky_push_constant.brightness_multiplier = p_brightness_multiplier;
 	store_transform_3x3(p_orientation, sky_push_constant.orientation);
 
-	RD::get_singleton()->buffer_update(sky_scene_state.params_uniform_buffer, 0, sizeof(SkyPushConstant), &sky_push_constant);
+	RD::get_singleton()->buffer_update(sky_scene_state.params_uniform_buffer[sky_scene_state.curr_params_idx], 0, sizeof(SkyPushConstant), &sky_push_constant);
 }
 // </TF>
 void SkyRD::_render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineCacheRD *p_pipeline, RID p_uniform_set, RID p_texture_set, const Projection &p_projection, const Basis &p_orientation, const Vector3 &p_position, float p_luminance_multiplier, float p_brightness_multiplier) {
@@ -262,7 +313,7 @@ void SkyRD::_render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineC
 
 	// Update uniform sets.
 	{
-		RD::get_singleton()->draw_list_bind_uniform_set(draw_list, sky_scene_state.uniform_set, SKY_SET_UNIFORMS);
+		RD::get_singleton()->draw_list_bind_uniform_set(draw_list, sky_scene_state.uniform_set[sky_scene_state.curr_params_idx], SKY_SET_UNIFORMS);
 		if (p_uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(p_uniform_set)) { // Material may not have a uniform set.
 			RD::get_singleton()->draw_list_bind_uniform_set(draw_list, p_uniform_set, SKY_SET_MATERIAL);
 		}
@@ -285,6 +336,8 @@ void SkyRD::_render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineC
 	// </TF>
 
 	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);
+
+	++sky_scene_state.curr_params_idx;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -890,49 +943,6 @@ void sky() {
 		SkyMaterialData *md = static_cast<SkyMaterialData *>(material_storage->material_get_data(sky_shader.default_material, RendererRD::MaterialStorage::SHADER_TYPE_SKY));
 		sky_shader.default_shader_rd = sky_shader.shader.version_get_shader(md->shader_data->version, SKY_VERSION_BACKGROUND);
 		sky_scene_state.uniform_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SkySceneState::UBO));
-
-		Vector<RD::Uniform> uniforms;
-
-		// <TF>
-		// @ShadyTF
-		// replacing push constants with uniform buffer
-		// preparing uniform buffer in uniform set
-		sky_scene_state.params_uniform_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SkyPushConstant), Vector<uint8_t>(), RD::BUFFER_CREATION_DYNAMIC_PERSISTENT_BIT);
-		{
-			RD::Uniform u;
-			u.binding = 0;
-			u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC;
-			u.append_id(sky_scene_state.params_uniform_buffer);
-			uniforms.push_back(u);
-		}
-		// </TF>
-		{
-			RD::Uniform u;
-			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
-			u.binding = 1;
-			u.append_id(RendererRD::MaterialStorage::get_singleton()->global_shader_uniforms_get_storage_buffer());
-			uniforms.push_back(u);
-		}
-
-		{
-			RD::Uniform u;
-			u.binding = 2;
-			u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
-			u.append_id(sky_scene_state.uniform_buffer);
-			uniforms.push_back(u);
-		}
-
-		{
-			RD::Uniform u;
-			u.binding = 3;
-			u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
-			u.append_id(sky_scene_state.directional_light_buffer);
-			uniforms.push_back(u);
-		}
-
-		material_storage->samplers_rd_get_default().append_uniforms(uniforms, SAMPLERS_BINDING_FIRST_INDEX);
-
-		sky_scene_state.uniform_set = RD::get_singleton()->uniform_set_create(uniforms, sky_shader.default_shader_rd, SKY_SET_UNIFORMS);
 	}
 
 	{
@@ -1016,8 +1026,15 @@ SkyRD::~SkyRD() {
 	material_storage->shader_free(sky_scene_state.fog_shader);
 	material_storage->material_free(sky_scene_state.fog_material);
 
-	if (RD::get_singleton()->uniform_set_is_valid(sky_scene_state.uniform_set)) {
-		RD::get_singleton()->free(sky_scene_state.uniform_set);
+	DEV_ASSERT(sky_scene_state.params_uniform_buffer.size() == sky_scene_state.uniform_set.size());
+	const uint32_t elem_count = sky_scene_state.params_uniform_buffer.size();
+	for (uint32_t i = 0u; i < elem_count; ++i) {
+		if (RD::get_singleton()->uniform_set_is_valid(sky_scene_state.uniform_set[i])) {
+			RD::get_singleton()->free(sky_scene_state.uniform_set[i]);
+		}
+		if (sky_scene_state.uniform_set[i].is_valid()) {
+			RD::get_singleton()->free(sky_scene_state.params_uniform_buffer[i]);
+		}
 	}
 
 	if (RD::get_singleton()->uniform_set_is_valid(sky_scene_state.default_fog_uniform_set)) {
@@ -1026,6 +1043,27 @@ SkyRD::~SkyRD() {
 
 	if (RD::get_singleton()->uniform_set_is_valid(sky_scene_state.fog_only_texture_uniform_set)) {
 		RD::get_singleton()->free(sky_scene_state.fog_only_texture_uniform_set);
+	}
+}
+
+void SkyRD::reset_frame() {
+	sky_scene_state.curr_params_idx = 0u;
+
+	DEV_ASSERT(sky_scene_state.params_uniform_buffer.size() == sky_scene_state.uniform_set.size());
+
+	// Only keep up to 6 (i.e. a cubemap) since that should be the general case. Peak may be much bigger though.
+	uint32_t elem_count = sky_scene_state.params_uniform_buffer.size();
+	while (elem_count > 6u) {
+		--elem_count;
+		if (RD::get_singleton()->uniform_set_is_valid(sky_scene_state.uniform_set[elem_count])) {
+			RD::get_singleton()->free(sky_scene_state.uniform_set[elem_count]);
+		}
+		if (sky_scene_state.uniform_set[elem_count].is_valid()) {
+			RD::get_singleton()->free(sky_scene_state.params_uniform_buffer[elem_count]);
+		}
+
+		sky_scene_state.uniform_set.remove_at(elem_count);
+		sky_scene_state.params_uniform_buffer.remove_at(elem_count);
 	}
 }
 

@@ -31,6 +31,7 @@
 #ifndef TONE_MAPPER_RD_H
 #define TONE_MAPPER_RD_H
 
+#include "servers/rendering/renderer_rd/effects/push_constants_emu.h"
 #include "servers/rendering/renderer_rd/pipeline_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/effects/tonemap.glsl.gen.h"
 
@@ -101,14 +102,11 @@ private:
 	 * compute, as that framebuffer might be in different formats
 	 */
 	struct Tonemap {
-		TonemapPushConstant push_constant;
+		PushConstantsEmu<TonemapPushConstant, 4u> push_constant2;
 		TonemapShaderRD shader;
 		RID shader_version;
 		PipelineCacheRD pipelines[TONEMAP_MODE_MAX];
 	} tonemap;
-
-	RID params_uniform_set;
-	RID params_uniform_buffer;
 
 public:
 	ToneMapper();
@@ -161,11 +159,6 @@ public:
 
 	void tonemapper(RID p_source_color, RID p_dst_framebuffer, const TonemapSettings &p_settings);
 	void tonemapper(RD::DrawListID p_subpass_draw_list, RID p_source_color, RD::FramebufferFormatID p_dst_format_id, const TonemapSettings &p_settings);
-	// <TF>
-	// @ShadyTF
-	// replace push constants with UBO
-	void prepare_params(const TonemapSettings &p_settings);
-	// </TF>
 };
 
 } // namespace RendererRD

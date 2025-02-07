@@ -31,6 +31,7 @@
 #ifndef COPY_EFFECTS_RD_H
 #define COPY_EFFECTS_RD_H
 
+#include "servers/rendering/renderer_rd/effects/push_constants_emu.h"
 #include "servers/rendering/renderer_rd/pipeline_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/effects/blur_raster.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/copy.glsl.gen.h"
@@ -97,15 +98,13 @@ private:
 	};
 
 	struct BlurRaster {
-		BlurRasterPushConstant push_constant;
 		BlurRasterShaderRD shader;
 		RID shader_version;
 		PipelineCacheRD pipelines[BLUR_MODE_MAX];
 		// <TF>
 		// @ShadyTF
 		// replace push constants with UBO
-		RID params_uniform_set;
-		RID params_uniform_buffer;
+		PushConstantsEmu<BlurRasterPushConstant> push_constant;
 		// </TF>
 	} blur_raster;
 
@@ -170,9 +169,7 @@ private:
 		RID shader_version;
 		RID pipelines[COPY_MODE_MAX];
 
-		RID params_uniform_buffer;
-		RID params_uniform_set;
-
+		PushConstantsEmu<CopyPushConstant> push_constant;
 	} copy;
 
 	// Copy to FB shader
@@ -220,8 +217,7 @@ private:
 		// <TF>
 		// @ShadyTF
 		// replace push constants with UBO
-		RID params_uniform_set;
-		RID params_uniform_buffer;
+		PushConstantsEmu<CopyToFbPushConstant> push_constant;
 		// </TF>
 
 	} copy_to_fb;
@@ -241,8 +237,7 @@ private:
 		// <TF>
 		// @ShadyTF
 		// replace push constants with UBO
-		RID params_uniform_set;
-		RID params_uniform_buffer;
+		PushConstantsEmu<CopyToDPPushConstant> push_constant;
 		// </TF>
 	} cube_to_dp;
 
@@ -337,10 +332,6 @@ private:
 	} specular_merge;
 
 	static CopyEffects *singleton;
-
-private:
-	void _update_copy_to_fb_uniform_set(const CopyToFbPushConstant *p_buffer);
-	void _update_copy_uniform_set(const CopyPushConstant *p_buffer);
 
 public:
 	static CopyEffects *get_singleton();

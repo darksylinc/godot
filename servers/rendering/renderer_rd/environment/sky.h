@@ -139,6 +139,7 @@ private:
 	// @ShadyTF
 	// replacing push constants with uniform buffer
 	// update uniform buffers
+	void create_uniform_buffer();
 	void _render_sky_prepare_params(float p_time, const Projection &p_projection, const Basis &p_orientation, const Vector3 &p_position, float p_luminance_multiplier, float p_brightness_multiplier);
 	// </TF>
 
@@ -179,7 +180,12 @@ public:
 		uint32_t max_directional_lights;
 		uint32_t last_frame_directional_light_count;
 		RID directional_light_buffer;
-		RID uniform_set;
+		// <TF>
+		// @dark_sylinc
+		// replacing push constants with uniform buffer
+		// preparing uniform buffer in uniform set
+		LocalVector<RID> uniform_set;
+		// </TF>
 		RID uniform_buffer;
 		RID fog_uniform_set;
 		RID default_fog_uniform_set;
@@ -188,7 +194,8 @@ public:
 		// @ShadyTF
 		// replacing push constants with uniform buffer
 		SkyPushConstant params;
-		RID params_uniform_buffer;
+		LocalVector<RID> params_uniform_buffer;
+		uint32_t curr_params_idx = UINT32_MAX;
 		// </TF>
 
 		RID fog_shader;
@@ -314,6 +321,8 @@ public:
 	void init();
 	void set_texture_format(RD::DataFormat p_texture_format);
 	~SkyRD();
+
+	void reset_frame();
 
 	void setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_size);
 	void update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, const Vector3 &p_global_pos, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0);

@@ -54,7 +54,10 @@ ToneMapper::ToneMapper() {
 		tonemap_modes.push_back("\n#define USE_MULTIVIEW\n#define SUBPASS\n");
 		tonemap_modes.push_back("\n#define USE_MULTIVIEW\n#define SUBPASS\n#define USE_1D_LUT\n");
 
-		tonemap.shader.initialize(tonemap_modes);
+		Vector<uint64_t> dynamic_buffers;
+		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(4, 0)); // params_uniform_buffer.
+
+		tonemap.shader.initialize(tonemap_modes, "", Vector<RD::PipelineImmutableSampler>(), dynamic_buffers);
 
 		if (!RendererCompositorRD::get_singleton()->is_xr_enabled()) {
 			tonemap.shader.set_variant_enabled(TONEMAP_MODE_NORMAL_MULTIVIEW, false);
@@ -78,24 +81,12 @@ ToneMapper::ToneMapper() {
 		// <TF>
 		// @ShadyTF
 		// prepare uniform set and buffer
-		uint32_t params_size = sizeof(TonemapPushConstant);
-		params_uniform_buffer = RD::RenderingDevice::get_singleton()->uniform_buffer_create(params_size, Vector<uint8_t>(), RD::BUFFER_CREATION_DYNAMIC_PERSISTENT_BIT);
+		tonemap.push_constant2.shader = tonemap.shader.version_get_shader(tonemap.shader_version, 0);
 		// </TF>
 	}
 }
 
 ToneMapper::~ToneMapper() {
-	// <TF>
-	// @ShadyTF
-	// prepare uniform set and buffer
-	if (params_uniform_buffer.is_valid()) {
-		RD::RenderingDevice::get_singleton()->free(params_uniform_buffer);
-	}
-	if (params_uniform_set.is_valid()) {
-		RD::RenderingDevice::get_singleton()->free(params_uniform_set);
-	}
-
-	// </TF>
 	tonemap.shader.version_free(tonemap.shader_version);
 }
 
@@ -105,47 +96,49 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
 	ERR_FAIL_NULL(material_storage);
 
-	memset(&tonemap.push_constant, 0, sizeof(TonemapPushConstant));
+	TonemapPushConstant push_constant{};
 
-	tonemap.push_constant.flags |= p_settings.use_bcs ? TONEMAP_FLAG_USE_BCS : 0;
-	tonemap.push_constant.bcs[0] = p_settings.brightness;
-	tonemap.push_constant.bcs[1] = p_settings.contrast;
-	tonemap.push_constant.bcs[2] = p_settings.saturation;
+	push_constant.flags |= p_settings.use_bcs ? TONEMAP_FLAG_USE_BCS : 0;
+	push_constant.bcs[0] = p_settings.brightness;
+	push_constant.bcs[1] = p_settings.contrast;
+	push_constant.bcs[2] = p_settings.saturation;
 
-	tonemap.push_constant.flags |= p_settings.use_glow ? TONEMAP_FLAG_USE_GLOW : 0;
-	tonemap.push_constant.glow_intensity = p_settings.glow_intensity;
-	tonemap.push_constant.glow_map_strength = p_settings.glow_map_strength;
-	tonemap.push_constant.glow_levels[0] = p_settings.glow_levels[0]; // clean this up to just pass by pointer or something
-	tonemap.push_constant.glow_levels[1] = p_settings.glow_levels[1];
-	tonemap.push_constant.glow_levels[2] = p_settings.glow_levels[2];
-	tonemap.push_constant.glow_levels[3] = p_settings.glow_levels[3];
-	tonemap.push_constant.glow_levels[4] = p_settings.glow_levels[4];
-	tonemap.push_constant.glow_levels[5] = p_settings.glow_levels[5];
-	tonemap.push_constant.glow_levels[6] = p_settings.glow_levels[6];
-	tonemap.push_constant.glow_texture_size[0] = p_settings.glow_texture_size.x;
-	tonemap.push_constant.glow_texture_size[1] = p_settings.glow_texture_size.y;
-	tonemap.push_constant.glow_mode = p_settings.glow_mode;
+	push_constant.flags |= p_settings.use_glow ? TONEMAP_FLAG_USE_GLOW : 0;
+	push_constant.glow_intensity = p_settings.glow_intensity;
+	push_constant.glow_map_strength = p_settings.glow_map_strength;
+	push_constant.glow_levels[0] = p_settings.glow_levels[0]; // clean this up to just pass by pointer or something
+	push_constant.glow_levels[1] = p_settings.glow_levels[1];
+	push_constant.glow_levels[2] = p_settings.glow_levels[2];
+	push_constant.glow_levels[3] = p_settings.glow_levels[3];
+	push_constant.glow_levels[4] = p_settings.glow_levels[4];
+	push_constant.glow_levels[5] = p_settings.glow_levels[5];
+	push_constant.glow_levels[6] = p_settings.glow_levels[6];
+	push_constant.glow_texture_size[0] = p_settings.glow_texture_size.x;
+	push_constant.glow_texture_size[1] = p_settings.glow_texture_size.y;
+	push_constant.glow_mode = p_settings.glow_mode;
 
 	int mode = p_settings.glow_use_bicubic_upscale ? TONEMAP_MODE_BICUBIC_GLOW_FILTER : TONEMAP_MODE_NORMAL;
 	if (p_settings.use_1d_color_correction) {
 		mode += 2;
 	}
 
-	tonemap.push_constant.tonemapper = p_settings.tonemap_mode;
-	tonemap.push_constant.flags |= p_settings.use_auto_exposure ? TONEMAP_FLAG_USE_AUTO_EXPOSURE : 0;
-	tonemap.push_constant.exposure = p_settings.exposure;
-	tonemap.push_constant.white = p_settings.white;
-	tonemap.push_constant.auto_exposure_scale = p_settings.auto_exposure_scale;
-	tonemap.push_constant.luminance_multiplier = p_settings.luminance_multiplier;
+	push_constant.tonemapper = p_settings.tonemap_mode;
+	push_constant.flags |= p_settings.use_auto_exposure ? TONEMAP_FLAG_USE_AUTO_EXPOSURE : 0;
+	push_constant.exposure = p_settings.exposure;
+	push_constant.white = p_settings.white;
+	push_constant.auto_exposure_scale = p_settings.auto_exposure_scale;
+	push_constant.luminance_multiplier = p_settings.luminance_multiplier;
 
-	tonemap.push_constant.flags |= p_settings.use_color_correction ? TONEMAP_FLAG_USE_COLOR_CORRECTION : 0;
+	push_constant.flags |= p_settings.use_color_correction ? TONEMAP_FLAG_USE_COLOR_CORRECTION : 0;
 
-	tonemap.push_constant.flags |= p_settings.use_fxaa ? TONEMAP_FLAG_USE_FXAA : 0;
-	tonemap.push_constant.flags |= p_settings.use_debanding ? TONEMAP_FLAG_USE_DEBANDING : 0;
-	tonemap.push_constant.pixel_size[0] = 1.0 / p_settings.texture_size.x;
-	tonemap.push_constant.pixel_size[1] = 1.0 / p_settings.texture_size.y;
+	push_constant.flags |= p_settings.use_fxaa ? TONEMAP_FLAG_USE_FXAA : 0;
+	push_constant.flags |= p_settings.use_debanding ? TONEMAP_FLAG_USE_DEBANDING : 0;
+	push_constant.pixel_size[0] = 1.0 / p_settings.texture_size.x;
+	push_constant.pixel_size[1] = 1.0 / p_settings.texture_size.y;
 
-	tonemap.push_constant.flags |= p_settings.convert_to_srgb ? TONEMAP_FLAG_CONVERT_TO_SRGB : 0;
+	push_constant.flags |= p_settings.convert_to_srgb ? TONEMAP_FLAG_CONVERT_TO_SRGB : 0;
+
+	PushConstantsEmu<TonemapPushConstant, 4u>::ParamsUniform params_uniform = tonemap.push_constant2.upload_and_advance(push_constant);
 
 	if (p_settings.view_count > 1) {
 		// Use USE_MULTIVIEW versions
@@ -196,7 +189,7 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	// replace push constant with UBO
 	// was:
 	//RD::get_singleton()->draw_list_set_push_constant(draw_list, &tonemap.push_constant, sizeof(TonemapPushConstant));
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform_set, 4);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 4);
 	// </TF>
 	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);
 	RD::get_singleton()->draw_list_end();
@@ -208,15 +201,15 @@ void ToneMapper::tonemapper(RD::DrawListID p_subpass_draw_list, RID p_source_col
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
 	ERR_FAIL_NULL(material_storage);
 
-	memset(&tonemap.push_constant, 0, sizeof(TonemapPushConstant));
+	TonemapPushConstant push_constant{};
 
-	tonemap.push_constant.flags |= p_settings.use_bcs ? TONEMAP_FLAG_USE_BCS : 0;
-	tonemap.push_constant.bcs[0] = p_settings.brightness;
-	tonemap.push_constant.bcs[1] = p_settings.contrast;
-	tonemap.push_constant.bcs[2] = p_settings.saturation;
+	push_constant.flags |= p_settings.use_bcs ? TONEMAP_FLAG_USE_BCS : 0;
+	push_constant.bcs[0] = p_settings.brightness;
+	push_constant.bcs[1] = p_settings.contrast;
+	push_constant.bcs[2] = p_settings.saturation;
 
 	ERR_FAIL_COND_MSG(p_settings.use_glow, "Glow is not supported when using subpasses.");
-	tonemap.push_constant.flags |= p_settings.use_glow ? TONEMAP_FLAG_USE_GLOW : 0;
+	push_constant.flags |= p_settings.use_glow ? TONEMAP_FLAG_USE_GLOW : 0;
 
 	int mode = p_settings.use_1d_color_correction ? TONEMAP_MODE_SUBPASS_1D_LUT : TONEMAP_MODE_SUBPASS;
 	if (p_settings.view_count > 1) {
@@ -224,18 +217,20 @@ void ToneMapper::tonemapper(RD::DrawListID p_subpass_draw_list, RID p_source_col
 		mode += 6;
 	}
 
-	tonemap.push_constant.tonemapper = p_settings.tonemap_mode;
-	tonemap.push_constant.flags |= p_settings.use_auto_exposure ? TONEMAP_FLAG_USE_AUTO_EXPOSURE : 0;
-	tonemap.push_constant.exposure = p_settings.exposure;
-	tonemap.push_constant.white = p_settings.white;
-	tonemap.push_constant.auto_exposure_scale = p_settings.auto_exposure_scale;
+	push_constant.tonemapper = p_settings.tonemap_mode;
+	push_constant.flags |= p_settings.use_auto_exposure ? TONEMAP_FLAG_USE_AUTO_EXPOSURE : 0;
+	push_constant.exposure = p_settings.exposure;
+	push_constant.white = p_settings.white;
+	push_constant.auto_exposure_scale = p_settings.auto_exposure_scale;
 
-	tonemap.push_constant.flags |= p_settings.use_color_correction ? TONEMAP_FLAG_USE_COLOR_CORRECTION : 0;
+	push_constant.flags |= p_settings.use_color_correction ? TONEMAP_FLAG_USE_COLOR_CORRECTION : 0;
 
-	tonemap.push_constant.flags |= p_settings.use_debanding ? TONEMAP_FLAG_USE_DEBANDING : 0;
-	tonemap.push_constant.luminance_multiplier = p_settings.luminance_multiplier;
+	push_constant.flags |= p_settings.use_debanding ? TONEMAP_FLAG_USE_DEBANDING : 0;
+	push_constant.luminance_multiplier = p_settings.luminance_multiplier;
 
-	tonemap.push_constant.flags |= p_settings.convert_to_srgb ? TONEMAP_FLAG_CONVERT_TO_SRGB : 0;
+	push_constant.flags |= p_settings.convert_to_srgb ? TONEMAP_FLAG_CONVERT_TO_SRGB : 0;
+
+	PushConstantsEmu<TonemapPushConstant, 4u>::ParamsUniform params_uniform = tonemap.push_constant2.upload_and_advance(push_constant);
 
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	RID default_mipmap_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
@@ -283,60 +278,7 @@ void ToneMapper::tonemapper(RD::DrawListID p_subpass_draw_list, RID p_source_col
 	// replace push constant with UBO
 	// was:
 	//RD::get_singleton()->draw_list_set_push_constant(p_subpass_draw_list, &tonemap.push_constant, sizeof(TonemapPushConstant));
-	RD::get_singleton()->draw_list_bind_uniform_set(p_subpass_draw_list, params_uniform_set, 4);
+	RD::get_singleton()->draw_list_bind_uniform_set(p_subpass_draw_list, params_uniform.set, 4);
 	// </TF>
 	RD::get_singleton()->draw_list_draw(p_subpass_draw_list, false, 1u, 3u);
 }
-
-// <TF>
-// @ShadyTF
-// replace push constant with UBO
-void ToneMapper::prepare_params(const TonemapSettings &p_settings) {
-	memset(&tonemap.push_constant, 0, sizeof(TonemapPushConstant));
-
-	tonemap.push_constant.flags |= p_settings.use_bcs ? TONEMAP_FLAG_USE_BCS : 0;
-	tonemap.push_constant.bcs[0] = p_settings.brightness;
-	tonemap.push_constant.bcs[1] = p_settings.contrast;
-	tonemap.push_constant.bcs[2] = p_settings.saturation;
-
-	tonemap.push_constant.flags |= p_settings.use_glow ? TONEMAP_FLAG_USE_GLOW : 0;
-	tonemap.push_constant.glow_intensity = p_settings.glow_intensity;
-	tonemap.push_constant.glow_map_strength = p_settings.glow_map_strength;
-	tonemap.push_constant.glow_levels[0] = p_settings.glow_levels[0]; // clean this up to just pass by pointer or something
-	tonemap.push_constant.glow_levels[1] = p_settings.glow_levels[1];
-	tonemap.push_constant.glow_levels[2] = p_settings.glow_levels[2];
-	tonemap.push_constant.glow_levels[3] = p_settings.glow_levels[3];
-	tonemap.push_constant.glow_levels[4] = p_settings.glow_levels[4];
-	tonemap.push_constant.glow_levels[5] = p_settings.glow_levels[5];
-	tonemap.push_constant.glow_levels[6] = p_settings.glow_levels[6];
-	tonemap.push_constant.glow_texture_size[0] = p_settings.glow_texture_size.x;
-	tonemap.push_constant.glow_texture_size[1] = p_settings.glow_texture_size.y;
-	tonemap.push_constant.glow_mode = p_settings.glow_mode;
-
-	tonemap.push_constant.tonemapper = p_settings.tonemap_mode;
-	tonemap.push_constant.flags |= p_settings.use_auto_exposure ? TONEMAP_FLAG_USE_AUTO_EXPOSURE : 0;
-	tonemap.push_constant.exposure = p_settings.exposure;
-	tonemap.push_constant.white = p_settings.white;
-	tonemap.push_constant.auto_exposure_scale = p_settings.auto_exposure_scale;
-
-	tonemap.push_constant.flags |= p_settings.use_color_correction ? TONEMAP_FLAG_USE_COLOR_CORRECTION : 0;
-
-	tonemap.push_constant.flags |= p_settings.use_debanding ? TONEMAP_FLAG_USE_DEBANDING : 0;
-	tonemap.push_constant.luminance_multiplier = p_settings.luminance_multiplier;
-
-	tonemap.push_constant.flags |= p_settings.convert_to_srgb ? TONEMAP_FLAG_CONVERT_TO_SRGB : 0;
-
-	RD::RenderingDevice::get_singleton()->buffer_update(params_uniform_buffer, 0, sizeof(TonemapPushConstant), &tonemap.push_constant, true);
-
-	Vector<RD::Uniform> params_uniforms;
-	RD::Uniform u;
-	u.binding = 0;
-	u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC;
-	u.append_id(params_uniform_buffer);
-	params_uniforms.push_back(u);
-	if (params_uniform_set.is_valid()) {
-		RD::get_singleton()->free(params_uniform_set);
-	}
-	params_uniform_set = RD::RenderingDevice::get_singleton()->uniform_set_create(params_uniforms, tonemap.shader.version_get_shader(tonemap.shader_version, 0), 4, true);
-}
-// </TF>
