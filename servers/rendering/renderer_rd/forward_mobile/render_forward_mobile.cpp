@@ -751,7 +751,6 @@ void RenderForwardMobile::_render_scene(RenderDataRD *p_render_data, const Color
 	ERR_FAIL_COND(rb.is_null());
 
 	scene_state.curr_uniform_buf_idx = UINT32_MAX;
-	sky.reset_frame();
 
 	Ref<RenderBufferDataForwardMobile> rb_data;
 	if (rb->has_custom_data(RB_SCOPE_MOBILE)) {
@@ -1104,13 +1103,6 @@ void RenderForwardMobile::_render_scene(RenderDataRD *p_render_data, const Color
 			}
 		}
 
-		// <TF>
-		// @ShadyTF
-		// replacing push constants with uniform buffer
-		if (draw_sky || draw_sky_fog_only) {
-			sky.draw_sky_prepare_params(p_render_data->environment, time, sky_luminance_multiplier, sky_brightness_multiplier);
-		}
-		// </TF>
 		RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(framebuffer, load_color ? RD::DRAW_CLEAR_DEPTH : (RD::DRAW_CLEAR_COLOR_0 | RD::DRAW_CLEAR_DEPTH), c, 0.0f, 0, p_render_data->render_region, breadcrumb);
 		RD::FramebufferFormatID fb_format = RD::get_singleton()->framebuffer_get_format(framebuffer);
 

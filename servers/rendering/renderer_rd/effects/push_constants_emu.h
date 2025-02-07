@@ -38,7 +38,7 @@
 
 namespace RendererRD {
 
-template <typename T, uint32_t set_idx = 2u>
+template <typename T, uint32_t SET_IDX = 2u, uint32_t MAX_EXTRA_BUFFERS = UINT32_MAX>
 struct PushConstantsEmu {
 	struct ParamsUniform {
 		RID buffer;
@@ -64,9 +64,27 @@ private:
 		u.append_id(pu.buffer);
 		params_uniforms.push_back(u);
 
-		pu.set = rd->uniform_set_create(params_uniforms, shader, set_idx);
+		pu.set = rd->uniform_set_create(params_uniforms, shader, SET_IDX);
 
 		params_uniform.push_back(pu);
+	}
+
+	void shrink_to(const uint32_t p_new_size) {
+		DEV_ASSERT(curr_idx == 0u && "This function can only be called after reset and before being upload_and_advance again!");
+
+		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
+
+		uint32_t elem_count = params_uniform.size();
+		while (elem_count >= p_new_size) {
+			--elem_count;
+			if (params_uniform[elem_count].set.is_valid()) {
+				rd->free(params_uniform[elem_count].set);
+			}
+			if (params_uniform[elem_count].buffer.is_valid()) {
+				rd->free(params_uniform[elem_count].buffer);
+			}
+			params_uniform.remove_at(elem_count);
+		}
 	}
 
 public:
@@ -101,6 +119,9 @@ public:
 
 	void _reset() {
 		curr_idx = 0u;
+		if (MAX_EXTRA_BUFFERS != UINT32_MAX) {
+			shrink_to(MAX_EXTRA_BUFFERS);
+		}
 	}
 
 	ParamsUniform upload_and_advance(const T &p_src_data) {
@@ -108,11 +129,96 @@ public:
 			push();
 		}
 
-		RD::RenderingDevice::get_singleton()->buffer_update(params_uniform[curr_idx].buffer, 0, sizeof(T), &p_src_data);
+		RD::RenderingDevice::get_singleton()->buffer_update(params_uniform[curr_idx].buffer, 0, sizeof(T), &p_src_data, true);
 
 		return params_uniform[curr_idx++];
 	}
 };
+
+template <typename T, typename S, uint32_t MAX_EXTRA_BUFFERS = UINT32_MAX>
+struct PushConstantsEmuEmbedded {
+	struct ParamsUniform {
+		RID buffer;
+		RID set;
+	};
+
+private:
+	LocalVector<ParamsUniform> params_uniform;
+	uint32_t curr_idx = 0u;
+
+	void push(S *p_embed_owner) {
+		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
+
+		ParamsUniform pu;
+		pu.buffer = rd->uniform_buffer_create(sizeof(T), Vector<uint8_t>(), RD::BUFFER_CREATION_DYNAMIC_PERSISTENT_BIT);
+		pu.set = p_embed_owner->_create_push_constant_uniform_set(pu.buffer);
+		params_uniform.push_back(pu);
+	}
+
+	void shrink_to(const uint32_t p_new_size) {
+		DEV_ASSERT(curr_idx == 0u && "This function can only be called after reset and before being upload_and_advance again!");
+
+		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
+
+		uint32_t elem_count = params_uniform.size();
+		while (elem_count >= p_new_size) {
+			--elem_count;
+			if (params_uniform[elem_count].set.is_valid()) {
+				rd->free(params_uniform[elem_count].set);
+			}
+			if (params_uniform[elem_count].buffer.is_valid()) {
+				rd->free(params_uniform[elem_count].buffer);
+			}
+			params_uniform.remove_at(elem_count);
+		}
+	}
+
+public:
+#ifdef DEV_ENABLED
+	~PushConstantsEmuEmbedded() {
+		DEV_ASSERT(params_uniform.is_empty());
+	}
+#endif
+
+	void init() {
+		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
+		rd->_register_push_constant_emu(&this->curr_idx);
+	}
+
+	void uninit() {
+		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
+
+		rd->_unregister_push_constant_emu(&this->curr_idx);
+
+		for (const ParamsUniform &pu : params_uniform) {
+			if (pu.set.is_valid()) {
+				rd->free(pu.set);
+			}
+			if (pu.buffer.is_valid()) {
+				rd->free(pu.buffer);
+			}
+		}
+		params_uniform.clear();
+	}
+
+	void _reset() {
+		curr_idx = 0u;
+		if (MAX_EXTRA_BUFFERS != UINT32_MAX) {
+			shrink_to(MAX_EXTRA_BUFFERS);
+		}
+	}
+
+	ParamsUniform upload_and_advance(const T &p_src_data, S *p_embed_owner) {
+		if (curr_idx >= params_uniform.size()) {
+			push(p_embed_owner);
+		}
+
+		RD::RenderingDevice::get_singleton()->buffer_update(params_uniform[curr_idx].buffer, 0, sizeof(T), &p_src_data, true);
+
+		return params_uniform[curr_idx++];
+	}
+};
+
 } //namespace RendererRD
 
 #endif // PUSH_CONSTANTS_EMU_RD_H

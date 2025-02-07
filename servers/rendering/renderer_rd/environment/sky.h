@@ -33,6 +33,7 @@
 
 #include "core/templates/rid_owner.h"
 #include "servers/rendering/renderer_compositor.h"
+#include "servers/rendering/renderer_rd/effects/push_constants_emu.h"
 #include "servers/rendering/renderer_rd/pipeline_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/environment/sky.glsl.gen.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
@@ -135,15 +136,15 @@ private:
 	};
 
 	void _render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineCacheRD *p_pipeline, RID p_uniform_set, RID p_texture_set, const Projection &p_projection, const Basis &p_orientation, const Vector3 &p_position, float p_luminance_multiplier, float p_brightness_modifier);
+
+public:
 	// <TF>
 	// @ShadyTF
 	// replacing push constants with uniform buffer
 	// update uniform buffers
-	void create_uniform_buffer();
-	void _render_sky_prepare_params(float p_time, const Projection &p_projection, const Basis &p_orientation, const Vector3 &p_position, float p_luminance_multiplier, float p_brightness_multiplier);
+	RID _create_push_constant_uniform_set(RID p_params_uniform_buffer);
 	// </TF>
 
-public:
 	struct SkySceneState {
 		struct UBO {
 			float combined_reprojection[RendererSceneRender::MAX_RENDER_VIEWS][16]; // 2 x 64 - 128
@@ -180,12 +181,6 @@ public:
 		uint32_t max_directional_lights;
 		uint32_t last_frame_directional_light_count;
 		RID directional_light_buffer;
-		// <TF>
-		// @dark_sylinc
-		// replacing push constants with uniform buffer
-		// preparing uniform buffer in uniform set
-		LocalVector<RID> uniform_set;
-		// </TF>
 		RID uniform_buffer;
 		RID fog_uniform_set;
 		RID default_fog_uniform_set;
@@ -193,8 +188,8 @@ public:
 		// <TF>
 		// @ShadyTF
 		// replacing push constants with uniform buffer
-		LocalVector<RID> params_uniform_buffer;
-		uint32_t curr_params_idx = UINT32_MAX;
+		// Only keep up to 6 (i.e. a cubemap) since that should be the general case. Peak may be much bigger though.
+		PushConstantsEmuEmbedded<SkyPushConstant, SkyRD, 6u> push_constant;
 		// </TF>
 
 		RID fog_shader;
@@ -308,7 +303,6 @@ public:
 	// @ShadyTF
 	// replacing push constants with uniform buffer
 	bool use_push_constants = true;
-	void draw_sky_prepare_params(RID p_env, double p_time, float p_luminance_multiplier, float p_brightness_multiplier);
 	// </TF>
 	RendererRD::MaterialStorage::ShaderData *_create_sky_shader_func();
 	static RendererRD::MaterialStorage::ShaderData *_create_sky_shader_funcs();
@@ -320,8 +314,6 @@ public:
 	void init();
 	void set_texture_format(RD::DataFormat p_texture_format);
 	~SkyRD();
-
-	void reset_frame();
 
 	void setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_size);
 	void update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, const Vector3 &p_global_pos, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0);
