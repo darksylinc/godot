@@ -819,6 +819,8 @@ void SkyRD::init() {
 
 		sky_shader.shader.initialize(sky_modes, defines, Vector<RD::PipelineImmutableSampler>(), dynamic_buffers);
 
+		sky_scene_state.push_constant.init();
+
 		if (!RendererCompositorRD::get_singleton()->is_xr_enabled()) {
 			sky_shader.shader.set_variant_enabled(SKY_VERSION_BACKGROUND_MULTIVIEW, false);
 			sky_shader.shader.set_variant_enabled(SKY_VERSION_HALF_RES_MULTIVIEW, false);

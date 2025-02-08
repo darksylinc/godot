@@ -33,23 +33,89 @@
 
 #include "servers/rendering_server.h"
 
-#define ERR_PC_RENDER_THREAD_MSG String("This function (") + String(__func__) + String(") can only be called from the render thread. ")
-#define ERR_PC_RENDER_THREAD_GUARD() ERR_FAIL_COND_MSG(render_thread_id != Thread::get_caller_id(), ERR_PC_RENDER_THREAD_MSG);
-
 namespace RendererRD {
 
-template <typename T, uint32_t SET_IDX = 2u, uint32_t MAX_EXTRA_BUFFERS = UINT32_MAX>
-struct PushConstantsEmu {
+class PushConstantsEmuBase {
+public:
 	struct ParamsUniform {
 		RID buffer;
 		RID set;
 	};
 
-private:
-	RID shader;
-
+protected:
 	LocalVector<ParamsUniform> params_uniform;
 	uint32_t curr_idx = 0u;
+	const uint32_t max_extra_buffers;
+
+	PushConstantsEmuBase(uint32_t p_max_extra_buffers) :
+			max_extra_buffers(p_max_extra_buffers) {}
+
+#ifdef DEV_ENABLED
+	~PushConstantsEmuBase() {
+		DEV_ASSERT(params_uniform.is_empty() && "Forgot to call uninit()!");
+	}
+#endif
+
+	void init_base() {
+		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
+		rd->_register_push_constant_emu(this);
+	}
+
+	void uninit_base() {
+		print_verbose("PushConstantsEmu used a total of " + itos(params_uniform.size()) + " buffers. A large number may indicate a waste of VRAM and can be brought down by tweaking MAX_EXTRA_BUFFERS for this buffer.");
+
+		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
+
+		rd->_unregister_push_constant_emu(this);
+
+		for (const ParamsUniform &pu : params_uniform) {
+			if (pu.set.is_valid()) {
+				rd->free(pu.set);
+			}
+			if (pu.buffer.is_valid()) {
+				rd->free(pu.buffer);
+			}
+		}
+
+		params_uniform.clear();
+	}
+
+	void shrink_to_max_extra_buffers() {
+		DEV_ASSERT(curr_idx == 0u && "This function can only be called after reset and before being upload_and_advance again!");
+
+		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
+
+		uint32_t elem_count = params_uniform.size();
+
+		if (elem_count >= max_extra_buffers) {
+			print_verbose("PushConstantsEmu peaked to " + itos(elem_count) + " elements and shrinking it to " + itos(max_extra_buffers) + ". If you see this message often, then something is wrong with rendering or MAX_EXTRA_BUFFERS needs to be increased.");
+		}
+
+		while (elem_count >= max_extra_buffers) {
+			--elem_count;
+			if (params_uniform[elem_count].set.is_valid()) {
+				rd->free(params_uniform[elem_count].set);
+			}
+			if (params_uniform[elem_count].buffer.is_valid()) {
+				rd->free(params_uniform[elem_count].buffer);
+			}
+			params_uniform.remove_at(elem_count);
+		}
+	}
+
+public:
+	void _reset() {
+		curr_idx = 0u;
+		if (max_extra_buffers != UINT32_MAX) {
+			shrink_to_max_extra_buffers();
+		}
+	}
+};
+
+template <typename T, uint32_t SET_IDX = 2u, uint32_t MAX_EXTRA_BUFFERS = UINT32_MAX>
+class PushConstantsEmu : public PushConstantsEmuBase {
+private:
+	RID shader;
 
 	void push() {
 		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
@@ -69,59 +135,18 @@ private:
 		params_uniform.push_back(pu);
 	}
 
-	void shrink_to(const uint32_t p_new_size) {
-		DEV_ASSERT(curr_idx == 0u && "This function can only be called after reset and before being upload_and_advance again!");
-
-		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
-
-		uint32_t elem_count = params_uniform.size();
-		while (elem_count >= p_new_size) {
-			--elem_count;
-			if (params_uniform[elem_count].set.is_valid()) {
-				rd->free(params_uniform[elem_count].set);
-			}
-			if (params_uniform[elem_count].buffer.is_valid()) {
-				rd->free(params_uniform[elem_count].buffer);
-			}
-			params_uniform.remove_at(elem_count);
-		}
-	}
-
 public:
-#ifdef DEV_ENABLED
-	~PushConstantsEmu() {
-		DEV_ASSERT(shader.is_null());
-	}
-#endif
+	PushConstantsEmu() :
+			PushConstantsEmuBase(MAX_EXTRA_BUFFERS) {}
 
 	void init(RID p_shader) {
+		init_base();
 		shader = p_shader;
-		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
-		rd->_register_push_constant_emu(&this->curr_idx);
 	}
 
 	void uninit() {
-		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
-
-		rd->_unregister_push_constant_emu(&this->curr_idx);
-
-		for (const ParamsUniform &pu : params_uniform) {
-			if (pu.set.is_valid()) {
-				rd->free(pu.set);
-			}
-			if (pu.buffer.is_valid()) {
-				rd->free(pu.buffer);
-			}
-		}
-
 		shader = RID();
-	}
-
-	void _reset() {
-		curr_idx = 0u;
-		if (MAX_EXTRA_BUFFERS != UINT32_MAX) {
-			shrink_to(MAX_EXTRA_BUFFERS);
-		}
+		uninit_base();
 	}
 
 	ParamsUniform upload_and_advance(const T &p_src_data) {
@@ -136,15 +161,11 @@ public:
 };
 
 template <typename T, typename S, uint32_t MAX_EXTRA_BUFFERS = UINT32_MAX>
-struct PushConstantsEmuEmbedded {
-	struct ParamsUniform {
-		RID buffer;
-		RID set;
-	};
-
+class PushConstantsEmuEmbedded : public PushConstantsEmuBase {
 private:
-	LocalVector<ParamsUniform> params_uniform;
-	uint32_t curr_idx = 0u;
+#ifdef DEV_ENABLED
+	bool initialized = false;
+#endif
 
 	void push(S *p_embed_owner) {
 		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
@@ -155,60 +176,27 @@ private:
 		params_uniform.push_back(pu);
 	}
 
-	void shrink_to(const uint32_t p_new_size) {
-		DEV_ASSERT(curr_idx == 0u && "This function can only be called after reset and before being upload_and_advance again!");
-
-		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
-
-		uint32_t elem_count = params_uniform.size();
-		while (elem_count >= p_new_size) {
-			--elem_count;
-			if (params_uniform[elem_count].set.is_valid()) {
-				rd->free(params_uniform[elem_count].set);
-			}
-			if (params_uniform[elem_count].buffer.is_valid()) {
-				rd->free(params_uniform[elem_count].buffer);
-			}
-			params_uniform.remove_at(elem_count);
-		}
-	}
-
 public:
-#ifdef DEV_ENABLED
-	~PushConstantsEmuEmbedded() {
-		DEV_ASSERT(params_uniform.is_empty());
-	}
-#endif
+	PushConstantsEmuEmbedded() :
+			PushConstantsEmuBase(MAX_EXTRA_BUFFERS) {}
 
 	void init() {
-		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
-		rd->_register_push_constant_emu(&this->curr_idx);
+#ifdef DEV_ENABLED
+		initialized = true;
+#endif
+		init_base();
 	}
 
 	void uninit() {
-		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
-
-		rd->_unregister_push_constant_emu(&this->curr_idx);
-
-		for (const ParamsUniform &pu : params_uniform) {
-			if (pu.set.is_valid()) {
-				rd->free(pu.set);
-			}
-			if (pu.buffer.is_valid()) {
-				rd->free(pu.buffer);
-			}
-		}
-		params_uniform.clear();
-	}
-
-	void _reset() {
-		curr_idx = 0u;
-		if (MAX_EXTRA_BUFFERS != UINT32_MAX) {
-			shrink_to(MAX_EXTRA_BUFFERS);
-		}
+#ifdef DEV_ENABLED
+		initialized = false;
+#endif
+		uninit_base();
 	}
 
 	ParamsUniform upload_and_advance(const T &p_src_data, S *p_embed_owner) {
+		DEV_ASSERT(initialized);
+
 		if (curr_idx >= params_uniform.size()) {
 			push(p_embed_owner);
 		}

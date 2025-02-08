@@ -42,6 +42,10 @@
 #include "servers/rendering/rendering_device_driver.h"
 #include "servers/rendering/rendering_device_graph.h"
 
+namespace RendererRD {
+class PushConstantsEmuBase;
+}
+
 class RDTextureFormat;
 class RDTextureView;
 class RDAttachmentFormat;
@@ -1578,7 +1582,7 @@ private:
 	uint64_t texture_memory = 0;
 	uint64_t buffer_memory = 0;
 
-	HashSet<uint32_t *> registered_push_constant_emus;
+	HashSet<RendererRD::PushConstantsEmuBase *> registered_push_constant_emus;
 
 protected:
 	void execute_chained_cmds(bool p_present_swap_chain,
@@ -1594,8 +1598,8 @@ public:
 	void _stall_for_previous_frames();
 	void _flush_and_stall_for_all_frames();
 
-	void _register_push_constant_emu(uint32_t *idx_ptr);
-	void _unregister_push_constant_emu(uint32_t *idx_ptr);
+	void _register_push_constant_emu(RendererRD::PushConstantsEmuBase *p_push_contstants_emu);
+	void _unregister_push_constant_emu(RendererRD::PushConstantsEmuBase *p_push_contstants_emu);
 
 	template <typename T>
 	void _free_rids(T &p_owner, const char *p_type);
