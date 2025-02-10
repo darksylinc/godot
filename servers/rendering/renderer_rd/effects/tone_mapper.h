@@ -102,7 +102,7 @@ private:
 	 * compute, as that framebuffer might be in different formats
 	 */
 	struct Tonemap {
-		PushConstantsEmu<TonemapPushConstant, 4u> push_constant;
+		PushConstantsEmu<TonemapPushConstant, 4u> push_constant = { "tonemap" };
 		TonemapShaderRD shader;
 		RID shader_version;
 		PipelineCacheRD pipelines[TONEMAP_MODE_MAX];

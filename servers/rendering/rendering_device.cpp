@@ -6389,7 +6389,6 @@ void RenderingDevice::_begin_frame(bool p_presented) {
 		driver->linear_uniform_set_pools_reset(frame);
 	}
 
-	fprintf(stderr, "[TEST] Resetting %i\n", registered_push_constant_emus.size());
 	for (RendererRD::PushConstantsEmuBase *push_constants_emu : registered_push_constant_emus) {
 		push_constants_emu->_reset();
 	}

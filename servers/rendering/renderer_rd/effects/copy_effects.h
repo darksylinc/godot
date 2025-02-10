@@ -104,7 +104,7 @@ private:
 		// <TF>
 		// @ShadyTF
 		// replace push constants with UBO
-		PushConstantsEmu<BlurRasterPushConstant> push_constant;
+		PushConstantsEmu<BlurRasterPushConstant> push_constant = { "blur_raster" };
 		// </TF>
 	} blur_raster;
 
@@ -169,7 +169,7 @@ private:
 		RID shader_version;
 		RID pipelines[COPY_MODE_MAX];
 
-		PushConstantsEmu<CopyPushConstant> push_constant;
+		PushConstantsEmu<CopyPushConstant> push_constant = { "copy" };
 	} copy;
 
 	// Copy to FB shader
@@ -217,7 +217,7 @@ private:
 		// <TF>
 		// @ShadyTF
 		// replace push constants with UBO
-		PushConstantsEmu<CopyToFbPushConstant> push_constant;
+		PushConstantsEmu<CopyToFbPushConstant> push_constant = { "copy_to_fb" };
 		// </TF>
 
 	} copy_to_fb;
@@ -237,7 +237,7 @@ private:
 		// <TF>
 		// @ShadyTF
 		// replace push constants with UBO
-		PushConstantsEmu<CopyToDPPushConstant> push_constant;
+		PushConstantsEmu<CopyToDPPushConstant> push_constant = { "cube_to_dp" };
 		// </TF>
 	} cube_to_dp;
 

@@ -189,7 +189,7 @@ public:
 		// @ShadyTF
 		// replacing push constants with uniform buffer
 		// Only keep up to 6 (i.e. a cubemap) since that should be the general case. Peak may be much bigger though.
-		PushConstantsEmuEmbedded<SkyPushConstant, SkyRD, 6u> push_constant;
+		PushConstantsEmuEmbedded<SkyPushConstant, SkyRD, 6u> push_constant = { "sky_scene_state" };
 		// </TF>
 
 		RID fog_shader;

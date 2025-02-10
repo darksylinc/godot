@@ -46,9 +46,18 @@ protected:
 	LocalVector<ParamsUniform> params_uniform;
 	uint32_t curr_idx = 0u;
 	const uint32_t max_extra_buffers;
+#ifdef DEBUG_ENABLED
+	const char *debug_name;
+#endif
 
-	PushConstantsEmuBase(uint32_t p_max_extra_buffers) :
-			max_extra_buffers(p_max_extra_buffers) {}
+	PushConstantsEmuBase(uint32_t p_max_extra_buffers, const char *p_debug_name) :
+			max_extra_buffers(p_max_extra_buffers)
+#ifdef DEBUG_ENABLED
+			,
+			debug_name(p_debug_name)
+#endif
+	{
+	}
 
 #ifdef DEV_ENABLED
 	~PushConstantsEmuBase() {
@@ -62,7 +71,13 @@ protected:
 	}
 
 	void uninit_base() {
-		print_verbose("PushConstantsEmu used a total of " + itos(params_uniform.size()) + " buffers. A large number may indicate a waste of VRAM and can be brought down by tweaking MAX_EXTRA_BUFFERS for this buffer.");
+		print_verbose("PushConstantsEmu '"
+#ifdef DEBUG_ENABLED
+				+ String(debug_name) +
+#else
+					  "{DEBUG_ENABLED unavailable}"
+#endif
+				"' used a total of " + itos(params_uniform.size()) + " buffers. A large number may indicate a waste of VRAM and can be brought down by tweaking MAX_EXTRA_BUFFERS for this buffer.");
 
 		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
 
@@ -87,11 +102,17 @@ protected:
 
 		uint32_t elem_count = params_uniform.size();
 
-		if (elem_count >= max_extra_buffers) {
-			print_verbose("PushConstantsEmu peaked to " + itos(elem_count) + " elements and shrinking it to " + itos(max_extra_buffers) + ". If you see this message often, then something is wrong with rendering or MAX_EXTRA_BUFFERS needs to be increased.");
+		if (elem_count > max_extra_buffers) {
+			print_verbose("PushConstantsEmu '"
+#ifdef DEBUG_ENABLED
+					+ String(debug_name) +
+#else
+						  "{DEBUG_ENABLED unavailable}"
+#endif
+					"' peaked to " + itos(elem_count) + " elements and shrinking it to " + itos(max_extra_buffers) + ". If you see this message often, then something is wrong with rendering or MAX_EXTRA_BUFFERS needs to be increased.");
 		}
 
-		while (elem_count >= max_extra_buffers) {
+		while (elem_count > max_extra_buffers) {
 			--elem_count;
 			if (params_uniform[elem_count].set.is_valid()) {
 				rd->free(params_uniform[elem_count].set);
@@ -136,8 +157,8 @@ private:
 	}
 
 public:
-	PushConstantsEmu() :
-			PushConstantsEmuBase(MAX_EXTRA_BUFFERS) {}
+	PushConstantsEmu(const char *p_debug_name) :
+			PushConstantsEmuBase(MAX_EXTRA_BUFFERS, p_debug_name) {}
 
 	void init(RID p_shader) {
 		init_base();
@@ -177,8 +198,8 @@ private:
 	}
 
 public:
-	PushConstantsEmuEmbedded() :
-			PushConstantsEmuBase(MAX_EXTRA_BUFFERS) {}
+	PushConstantsEmuEmbedded(const char *p_debug_name) :
+			PushConstantsEmuBase(MAX_EXTRA_BUFFERS, p_debug_name) {}
 
 	void init() {
 #ifdef DEV_ENABLED

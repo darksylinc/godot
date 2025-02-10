@@ -33,6 +33,7 @@
 
 #include "core/io/image.h"
 #include "servers/rendering/renderer_compositor.h"
+#include "servers/rendering/renderer_rd/effects/push_constants_emu.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/renderer_canvas_render_rd.h"
@@ -88,7 +89,6 @@ protected:
 	};
 
 	struct Blit {
-		BlitPushConstant push_constant;
 		BlitShaderRD shader;
 		RID shader_version;
 		RID pipelines[BLIT_MODE_MAX];
@@ -98,8 +98,7 @@ protected:
 		// <TF>
 		// @ShadyTF
 		// replace push constants with UBO
-		RID params_uniform_set;
-		RID params_uniform_buffer;
+		RendererRD::PushConstantsEmu<BlitPushConstant, 2u, 2u> push_constant = { "RendererCompositorRD::blit" };
 		// </TF>
 	} blit;
 
