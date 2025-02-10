@@ -56,18 +56,18 @@ layout(set = 0, binding = 0) uniform sampler2DArray source_color;
 layout(set = 0, binding = 0) uniform sampler2D source_color;
 #endif
 
-layout(set = 1, binding = 0) uniform sampler2D source_auto_exposure;
+layout(set = 0, binding = 1) uniform sampler2D source_auto_exposure;
 #ifdef USE_MULTIVIEW
-layout(set = 2, binding = 0) uniform sampler2DArray source_glow;
+layout(set = 0, binding = 1) uniform sampler2DArray source_glow;
 #else
-layout(set = 2, binding = 0) uniform sampler2D source_glow;
+layout(set = 0, binding = 1) uniform sampler2D source_glow;
 #endif
-layout(set = 2, binding = 1) uniform sampler2D glow_map;
+layout(set = 0, binding = 2) uniform sampler2D glow_map;
 
 #ifdef USE_1D_LUT
-layout(set = 3, binding = 0) uniform sampler2D source_color_correction;
+layout(set = 0, binding = 3) uniform sampler2D source_color_correction;
 #else
-layout(set = 3, binding = 0) uniform sampler3D source_color_correction;
+layout(set = 0, binding = 3) uniform sampler3D source_color_correction;
 #endif
 
 #define FLAG_USE_BCS (1 << 0)
@@ -83,7 +83,7 @@ layout(set = 3, binding = 0) uniform sampler3D source_color_correction;
 // replace push constants with UBO
 // Was:
 //layout(push_constant, std430) uniform Params {
-layout(set = 4, binding = 0, std140) uniform Params {
+layout(set = 1, binding = 0, std140) uniform Params {
 	// </TF>
 	vec3 bcs;
 	uint flags;

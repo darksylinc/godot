@@ -55,7 +55,7 @@ ToneMapper::ToneMapper() {
 		tonemap_modes.push_back("\n#define USE_MULTIVIEW\n#define SUBPASS\n#define USE_1D_LUT\n");
 
 		Vector<uint64_t> dynamic_buffers;
-		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(4, 0)); // params_uniform_buffer.
+		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(1, 0)); // params_uniform_buffer.
 
 		tonemap.shader.initialize(tonemap_modes, "", Vector<RD::PipelineImmutableSampler>(), dynamic_buffers);
 
@@ -139,7 +139,7 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 
 	push_constant.flags |= p_settings.convert_to_srgb ? TONEMAP_FLAG_CONVERT_TO_SRGB : 0;
 
-	PushConstantsEmu<TonemapPushConstant, 4u>::ParamsUniform params_uniform = tonemap.push_constant.upload_and_advance(push_constant);
+	PushConstantsEmu<TonemapPushConstant, 1u>::ParamsUniform params_uniform = tonemap.push_constant.upload_and_advance(push_constant);
 
 	if (p_settings.view_count > 1) {
 		// Use USE_MULTIVIEW versions
@@ -149,48 +149,63 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	RID default_mipmap_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
-	RD::Uniform u_source_color(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_source_color }));
+	thread_local LocalVector<RD::Uniform> uniforms;
+	uniforms.clear();
 
-	RD::Uniform u_exposure_texture;
-	u_exposure_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-	u_exposure_texture.binding = 0;
-	u_exposure_texture.append_id(default_sampler);
-	u_exposure_texture.append_id(p_settings.exposure_texture);
+	{
+		RD::Uniform u_source_color(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_source_color }));
+		uniforms.push_back(u_source_color);
+	}
 
-	RD::Uniform u_glow_texture;
-	u_glow_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-	u_glow_texture.binding = 0;
-	u_glow_texture.append_id(default_mipmap_sampler);
-	u_glow_texture.append_id(p_settings.glow_texture);
+	{
+		RD::Uniform u_exposure_texture;
+		u_exposure_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+		u_exposure_texture.binding = 0;
+		u_exposure_texture.append_id(default_sampler);
+		u_exposure_texture.append_id(p_settings.exposure_texture);
+		uniforms.push_back(u_exposure_texture);
+	}
 
-	RD::Uniform u_glow_map;
-	u_glow_map.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-	u_glow_map.binding = 1;
-	u_glow_map.append_id(default_mipmap_sampler);
-	u_glow_map.append_id(p_settings.glow_map);
+	{
+		RD::Uniform u_glow_texture;
+		u_glow_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+		u_glow_texture.binding = 1;
+		u_glow_texture.append_id(default_mipmap_sampler);
+		u_glow_texture.append_id(p_settings.glow_texture);
+		uniforms.push_back(u_glow_texture);
+	}
 
-	RD::Uniform u_color_correction_texture;
-	u_color_correction_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-	u_color_correction_texture.binding = 0;
-	u_color_correction_texture.append_id(default_sampler);
-	u_color_correction_texture.append_id(p_settings.color_correction_texture);
+	{
+		RD::Uniform u_glow_map;
+		u_glow_map.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+		u_glow_map.binding = 2;
+		u_glow_map.append_id(default_mipmap_sampler);
+		u_glow_map.append_id(p_settings.glow_map);
+		uniforms.push_back(u_glow_map);
+	}
+
+	{
+		RD::Uniform u_color_correction_texture;
+		u_color_correction_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+		u_color_correction_texture.binding = 3;
+		u_color_correction_texture.append_id(default_sampler);
+		u_color_correction_texture.append_id(p_settings.color_correction_texture);
+		uniforms.push_back(u_color_correction_texture);
+	}
 
 	RID shader = tonemap.shader.version_get_shader(tonemap.shader_version, mode);
 	ERR_FAIL_COND(shader.is_null());
 
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(p_dst_framebuffer);
 	RD::get_singleton()->draw_list_bind_render_pipeline(draw_list, tonemap.pipelines[mode].get_render_pipeline(RD::INVALID_ID, RD::get_singleton()->framebuffer_get_format(p_dst_framebuffer), false, RD::get_singleton()->draw_list_get_current_pass()));
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 0, u_source_color), 0);
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 1, u_exposure_texture), 1);
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 2, u_glow_texture, u_glow_map), 2);
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 3, u_color_correction_texture), 3);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache_vec(shader, 0, uniforms), 0);
 
 	// <TF>
 	// @ShadyTF
 	// replace push constant with UBO
 	// was:
 	//RD::get_singleton()->draw_list_set_push_constant(draw_list, &tonemap.push_constant, sizeof(TonemapPushConstant));
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 4);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 1);
 	// </TF>
 	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);
 	RD::get_singleton()->draw_list_end();
@@ -236,28 +251,43 @@ void ToneMapper::tonemapper(RD::DrawListID p_subpass_draw_list, RID p_source_col
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	RID default_mipmap_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
-	RD::Uniform u_source_color;
-	u_source_color.uniform_type = RD::UNIFORM_TYPE_INPUT_ATTACHMENT;
-	u_source_color.binding = 0;
-	u_source_color.append_id(p_source_color);
+	thread_local LocalVector<RD::Uniform> uniforms;
+	uniforms.clear();
 
-	RD::Uniform u_exposure_texture;
-	u_exposure_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-	u_exposure_texture.binding = 0;
-	u_exposure_texture.append_id(default_sampler);
-	u_exposure_texture.append_id(p_settings.exposure_texture);
+	{
+		RD::Uniform u_source_color;
+		u_source_color.uniform_type = RD::UNIFORM_TYPE_INPUT_ATTACHMENT;
+		u_source_color.binding = 0;
+		u_source_color.append_id(p_source_color);
+		uniforms.push_back(u_source_color);
+	}
 
-	RD::Uniform u_glow_texture;
-	u_glow_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-	u_glow_texture.binding = 0;
-	u_glow_texture.append_id(default_mipmap_sampler);
-	u_glow_texture.append_id(p_settings.glow_texture);
+	{
+		RD::Uniform u_exposure_texture;
+		u_exposure_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+		u_exposure_texture.binding = 1;
+		u_exposure_texture.append_id(default_sampler);
+		u_exposure_texture.append_id(p_settings.exposure_texture);
+		uniforms.push_back(u_exposure_texture);
+	}
 
-	RD::Uniform u_glow_map;
-	u_glow_map.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-	u_glow_map.binding = 1;
-	u_glow_map.append_id(default_mipmap_sampler);
-	u_glow_map.append_id(p_settings.glow_map);
+	{
+		RD::Uniform u_glow_texture;
+		u_glow_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+		u_glow_texture.binding = 2;
+		u_glow_texture.append_id(default_mipmap_sampler);
+		u_glow_texture.append_id(p_settings.glow_texture);
+		uniforms.push_back(u_glow_texture);
+	}
+
+	{
+		RD::Uniform u_glow_map;
+		u_glow_map.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+		u_glow_map.binding = 3;
+		u_glow_map.append_id(default_mipmap_sampler);
+		u_glow_map.append_id(p_settings.glow_map);
+		uniforms.push_back(u_glow_map);
+	}
 
 	RD::Uniform u_color_correction_texture;
 	u_color_correction_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
@@ -269,17 +299,14 @@ void ToneMapper::tonemapper(RD::DrawListID p_subpass_draw_list, RID p_source_col
 	ERR_FAIL_COND(shader.is_null());
 
 	RD::get_singleton()->draw_list_bind_render_pipeline(p_subpass_draw_list, tonemap.pipelines[mode].get_render_pipeline(RD::INVALID_ID, p_dst_format_id, false, RD::get_singleton()->draw_list_get_current_pass()));
-	RD::get_singleton()->draw_list_bind_uniform_set(p_subpass_draw_list, uniform_set_cache->get_cache(shader, 0, u_source_color), 0);
-	RD::get_singleton()->draw_list_bind_uniform_set(p_subpass_draw_list, uniform_set_cache->get_cache(shader, 1, u_exposure_texture), 1); // should be set to a default texture, it's ignored
-	RD::get_singleton()->draw_list_bind_uniform_set(p_subpass_draw_list, uniform_set_cache->get_cache(shader, 2, u_glow_texture, u_glow_map), 2); // should be set to a default texture, it's ignored
-	RD::get_singleton()->draw_list_bind_uniform_set(p_subpass_draw_list, uniform_set_cache->get_cache(shader, 3, u_color_correction_texture), 3);
+	RD::get_singleton()->draw_list_bind_uniform_set(p_subpass_draw_list, uniform_set_cache->get_cache_vec(shader, 0, uniforms), 0);
 
 	// <TF>
 	// @ShadyTF
 	// replace push constant with UBO
 	// was:
 	//RD::get_singleton()->draw_list_set_push_constant(p_subpass_draw_list, &tonemap.push_constant, sizeof(TonemapPushConstant));
-	RD::get_singleton()->draw_list_bind_uniform_set(p_subpass_draw_list, params_uniform.set, 4);
+	RD::get_singleton()->draw_list_bind_uniform_set(p_subpass_draw_list, params_uniform.set, 1);
 	// </TF>
 	RD::get_singleton()->draw_list_draw(p_subpass_draw_list, false, 1u, 3u);
 }
