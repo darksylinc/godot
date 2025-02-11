@@ -2106,7 +2106,7 @@ void RenderForwardMobile::_setup_environment(const RenderDataRD *p_render_data, 
 		uint32_t from = scene_state.uniform_buffers.size();
 		scene_state.uniform_buffers.resize(scene_state.curr_uniform_buf_idx + 1);
 		for (uint32_t i = from; i < scene_state.uniform_buffers.size(); i++) {
-			scene_state.uniform_buffers[i] = p_render_data->scene_data->create_uniform_buffer();
+			scene_state.uniform_buffers[i] = p_render_data->scene_data->create_uniform_buffer(true);
 		}
 	}
 

@@ -573,7 +573,12 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 			shader_versions.push_back(ShaderRD::VariantDefine(group, version, false));
 		}
 
-		shader.initialize(shader_versions, p_defines);
+		Vector<uint64_t> dynamic_buffers;
+		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(RenderForwardClustered::SCENE_UNIFORM_SET, 3)); // omni_light_buffer.
+		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(RenderForwardClustered::SCENE_UNIFORM_SET, 4)); // spot_light_buffer.
+		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(RenderForwardClustered::SCENE_UNIFORM_SET, 6)); // directional_light_buffer.
+
+		shader.initialize(shader_versions, p_defines, dynamic_buffers);
 
 		if (RendererCompositorRD::get_singleton()->is_xr_enabled()) {
 			shader.enable_group(SHADER_GROUP_MULTIVIEW);

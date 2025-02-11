@@ -831,7 +831,8 @@ void ShaderRD::_initialize_cache() {
 }
 
 // Same as above, but allows specifying shader compilation groups.
-void ShaderRD::initialize(const Vector<VariantDefine> &p_variant_defines, const String &p_general_defines) {
+void ShaderRD::initialize(const Vector<VariantDefine> &p_variant_defines, const String &p_general_defines, const Vector<uint64_t> &p_dynamic_buffers) {
+	dynamic_buffers = p_dynamic_buffers;
 	ERR_FAIL_COND(variant_defines.size());
 	ERR_FAIL_COND(p_variant_defines.is_empty());
 

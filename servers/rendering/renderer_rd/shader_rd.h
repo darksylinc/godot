@@ -213,7 +213,7 @@ public:
 	RS::ShaderNativeSourceCode version_get_native_source_code(RID p_version);
 
 	void initialize(const Vector<String> &p_variant_defines, const String &p_general_defines = "", const Vector<RD::PipelineImmutableSampler> &r_immutable_samplers = Vector<RD::PipelineImmutableSampler>(), const Vector<uint64_t> &p_dynamic_buffers = Vector<uint64_t>());
-	void initialize(const Vector<VariantDefine> &p_variant_defines, const String &p_general_defines = "");
+	void initialize(const Vector<VariantDefine> &p_variant_defines, const String &p_general_defines = "", const Vector<uint64_t> &p_dynamic_buffers = Vector<uint64_t>());
 
 	virtual ~ShaderRD();
 };
