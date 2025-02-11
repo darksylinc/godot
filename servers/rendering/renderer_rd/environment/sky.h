@@ -32,8 +32,8 @@
 #define SKY_RD_H
 
 #include "core/templates/rid_owner.h"
+#include "servers/rendering/push_constants_emu.h"
 #include "servers/rendering/renderer_compositor.h"
-#include "servers/rendering/renderer_rd/effects/push_constants_emu.h"
 #include "servers/rendering/renderer_rd/pipeline_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/environment/sky.glsl.gen.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"

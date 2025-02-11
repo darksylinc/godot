@@ -31,7 +31,7 @@
 #ifndef COPY_EFFECTS_RD_H
 #define COPY_EFFECTS_RD_H
 
-#include "servers/rendering/renderer_rd/effects/push_constants_emu.h"
+#include "servers/rendering/push_constants_emu.h"
 #include "servers/rendering/renderer_rd/pipeline_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/effects/blur_raster.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/copy.glsl.gen.h"

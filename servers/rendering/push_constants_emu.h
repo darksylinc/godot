@@ -28,12 +28,10 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#ifndef PUSH_CONSTANTS_EMU_RD_H
-#define PUSH_CONSTANTS_EMU_RD_H
+#ifndef PUSH_CONSTANTS_EMU_H
+#define PUSH_CONSTANTS_EMU_H
 
 #include "servers/rendering_server.h"
-
-namespace RendererRD {
 
 class PushConstantsEmuBase {
 public:
@@ -230,6 +228,4 @@ public:
 	}
 };
 
-} //namespace RendererRD
-
-#endif // PUSH_CONSTANTS_EMU_RD_H
+#endif // PUSH_CONSTANTS_EMU_H

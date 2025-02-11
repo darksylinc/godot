@@ -31,7 +31,7 @@
 #ifndef TONE_MAPPER_RD_H
 #define TONE_MAPPER_RD_H
 
-#include "servers/rendering/renderer_rd/effects/push_constants_emu.h"
+#include "servers/rendering/push_constants_emu.h"
 #include "servers/rendering/renderer_rd/pipeline_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/effects/tonemap.glsl.gen.h"
 

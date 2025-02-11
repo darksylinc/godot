@@ -32,8 +32,8 @@
 #define RENDERER_COMPOSITOR_RD_H
 
 #include "core/io/image.h"
+#include "servers/rendering/push_constants_emu.h"
 #include "servers/rendering/renderer_compositor.h"
-#include "servers/rendering/renderer_rd/effects/push_constants_emu.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/renderer_canvas_render_rd.h"
@@ -98,7 +98,7 @@ protected:
 		// <TF>
 		// @ShadyTF
 		// replace push constants with UBO
-		RendererRD::PushConstantsEmu<BlitPushConstant, 1u, 2u> push_constant = { "RendererCompositorRD::blit" };
+		PushConstantsEmu<BlitPushConstant, 1u, 2u> push_constant = { "RendererCompositorRD::blit" };
 		// </TF>
 	} blit;
 

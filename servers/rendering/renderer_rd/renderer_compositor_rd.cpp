@@ -98,7 +98,7 @@ void RendererCompositorRD::blit_render_targets_to_screen(DisplayServer::WindowID
 		push_constant.aspect_ratio = p_render_targets[i].lens_distortion.aspect_ratio;
 		push_constant.convert_to_srgb = texture_storage->render_target_is_using_hdr(p_render_targets[i].render_target);
 
-		const RendererRD::PushConstantsEmuBase::ParamsUniform params_uniform = blit.push_constant.upload_and_advance(push_constant);
+		const PushConstantsEmuBase::ParamsUniform params_uniform = blit.push_constant.upload_and_advance(push_constant);
 
 		// <TF>
 		// @ShadyTF
@@ -283,7 +283,7 @@ void RendererCompositorRD::set_boot_image(const Ref<Image> &p_image, const Color
 	push_constant.aspect_ratio = 1.0;
 	push_constant.convert_to_srgb = false;
 
-	const RendererRD::PushConstantsEmuBase::ParamsUniform params_uniform = blit.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = blit.push_constant.upload_and_advance(push_constant);
 	// </TF>
 
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin_for_screen(DisplayServer::MAIN_WINDOW_ID, p_color);

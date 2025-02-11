@@ -31,12 +31,12 @@
 #include "rendering_device.h"
 #include "rendering_device.compat.inc"
 
+#include "push_constants_emu.h"
 #include "rendering_device_binds.h"
 #include "shader_include_db.h"
 
 #include "core/config/project_settings.h"
 #include "core/io/dir_access.h"
-#include "servers/rendering/renderer_rd/effects/push_constants_emu.h"
 
 #define FORCE_SEPARATE_PRESENT_QUEUE 0
 #define PRINT_FRAMEBUFFER_FORMAT 0
@@ -6389,7 +6389,7 @@ void RenderingDevice::_begin_frame(bool p_presented) {
 		driver->linear_uniform_set_pools_reset(frame);
 	}
 
-	for (RendererRD::PushConstantsEmuBase *push_constants_emu : registered_push_constant_emus) {
+	for (PushConstantsEmuBase *push_constants_emu : registered_push_constant_emus) {
 		push_constants_emu->_reset();
 	}
 
@@ -6630,12 +6630,12 @@ void RenderingDevice::_flush_and_stall_for_all_frames() {
 	_begin_frame();
 }
 
-void RenderingDevice::_register_push_constant_emu(RendererRD::PushConstantsEmuBase *p_push_contstants_emu) {
+void RenderingDevice::_register_push_constant_emu(PushConstantsEmuBase *p_push_contstants_emu) {
 	ERR_RENDER_THREAD_GUARD();
 	registered_push_constant_emus.insert(p_push_contstants_emu);
 }
 
-void RenderingDevice::_unregister_push_constant_emu(RendererRD::PushConstantsEmuBase *p_push_contstants_emu) {
+void RenderingDevice::_unregister_push_constant_emu(PushConstantsEmuBase *p_push_contstants_emu) {
 	ERR_RENDER_THREAD_GUARD();
 	registered_push_constant_emus.remove(registered_push_constant_emus.find(p_push_contstants_emu));
 }
