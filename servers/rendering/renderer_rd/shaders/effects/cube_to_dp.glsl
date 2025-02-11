@@ -9,7 +9,7 @@
 // replace push constants with UBO
 // Was:
 //layout(push_constant, std430) uniform Params {
-layout(set = 2, binding = 0, std140) uniform Params {
+layout(set = 1, binding = 0, std140) uniform Params {
 	// </TF>
 	float z_far;
 	float z_near;
@@ -35,7 +35,7 @@ layout(location = 0) in vec2 uv_interp;
 
 layout(set = 0, binding = 0) uniform samplerCube source_cube;
 
-layout(set = 2, binding = 0, std140) uniform Params {
+layout(set = 1, binding = 0, std140) uniform Params {
 	//layout(push_constant, std430) uniform Params {
 	float z_far;
 	float z_near;

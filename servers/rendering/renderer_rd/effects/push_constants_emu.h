@@ -133,7 +133,7 @@ public:
 	}
 };
 
-template <typename T, uint32_t SET_IDX = 2u, uint32_t MAX_EXTRA_BUFFERS = UINT32_MAX>
+template <typename T, uint32_t SET_IDX = 1u, uint32_t MAX_EXTRA_BUFFERS = UINT32_MAX>
 class PushConstantsEmu : public PushConstantsEmuBase {
 private:
 	RID shader;
@@ -169,6 +169,8 @@ public:
 		shader = RID();
 		uninit_base();
 	}
+
+	static uint32_t set_idx() { return SET_IDX; }
 
 	ParamsUniform upload_and_advance(const T &p_src_data) {
 		if (curr_idx >= params_uniform.size()) {

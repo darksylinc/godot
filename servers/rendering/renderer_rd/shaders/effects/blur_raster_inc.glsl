@@ -6,7 +6,7 @@
 // replace push constants with UBO
 // Was:
 //layout(push_constant, std430) uniform Blur {
-layout(set = 2, binding = 0, std140) uniform Pos {
+layout(set = 1, binding = 0, std140) uniform Pos {
 	// </TF>
 	vec2 pixel_size; // 08 - 08
 	uint flags; // 04 - 12

@@ -54,6 +54,8 @@ class CopyEffects {
 private:
 	bool prefer_raster_effects;
 
+	static thread_local LocalVector<RD::Uniform> uniforms;
+
 	// Blur raster shader
 
 	enum BlurRasterMode {

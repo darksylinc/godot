@@ -39,6 +39,8 @@ using namespace RendererRD;
 
 CopyEffects *CopyEffects::singleton = nullptr;
 
+thread_local LocalVector<RD::Uniform> CopyEffects::uniforms;
+
 CopyEffects *CopyEffects::get_singleton() {
 	return singleton;
 }
@@ -59,7 +61,7 @@ CopyEffects::CopyEffects(bool p_prefer_raster_effects) {
 		blur_modes.push_back("\n#define MODE_SET_COLOR\n"); // BLUR_MODE_SET_COLOR
 
 		Vector<uint64_t> dynamic_buffers;
-		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(2, 0)); // params_uniform_buffer.
+		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(blur_raster.push_constant.set_idx(), 0));
 
 		blur_raster.shader.initialize(blur_modes, "", Vector<RD::PipelineImmutableSampler>(), dynamic_buffers);
 		blur_raster.shader_version = blur_raster.shader.version_create();
@@ -85,23 +87,31 @@ CopyEffects::CopyEffects(bool p_prefer_raster_effects) {
 	// </TF>
 
 	{
+		// All the variants use either:
+		//	- 2 textures (src + dst).
+		//	- 3 textures (src + dst + auto exposure).
+		//	- 1 textures (dst) (the "set color" variants).
+#define COPY_SHADER_SOURCE_PLUS_DEST "#define SOURCE_COLOR_SLOT 0\n#define DEST_BUFFER 1\n"
+#define COPY_SHADER_ALL_3 "#define SOURCE_COLOR_SLOT 0\n#define DEST_BUFFER 1\n#define SOURCE_AUTO_EXPOSURE 2\n"
+#define COPY_SHADER_DEST_ONLY "#define DEST_BUFFER 0\n"
+
 		Vector<String> copy_modes;
-		copy_modes.push_back("\n#define MODE_GAUSSIAN_BLUR\n");
-		copy_modes.push_back("\n#define MODE_GAUSSIAN_BLUR\n#define DST_IMAGE_8BIT\n");
-		copy_modes.push_back("\n#define MODE_GAUSSIAN_BLUR\n#define MODE_GLOW\n");
-		copy_modes.push_back("\n#define MODE_GAUSSIAN_BLUR\n#define MODE_GLOW\n#define GLOW_USE_AUTO_EXPOSURE\n");
-		copy_modes.push_back("\n#define MODE_SIMPLE_COPY\n");
-		copy_modes.push_back("\n#define MODE_SIMPLE_COPY\n#define DST_IMAGE_8BIT\n");
-		copy_modes.push_back("\n#define MODE_SIMPLE_COPY_DEPTH\n");
-		copy_modes.push_back("\n#define MODE_SET_COLOR\n");
-		copy_modes.push_back("\n#define MODE_SET_COLOR\n#define DST_IMAGE_8BIT\n");
-		copy_modes.push_back("\n#define MODE_MIPMAP\n");
-		copy_modes.push_back("\n#define MODE_LINEARIZE_DEPTH_COPY\n");
-		copy_modes.push_back("\n#define MODE_CUBEMAP_TO_PANORAMA\n");
-		copy_modes.push_back("\n#define MODE_CUBEMAP_ARRAY_TO_PANORAMA\n");
+		copy_modes.push_back("\n#define MODE_GAUSSIAN_BLUR\n" COPY_SHADER_SOURCE_PLUS_DEST);
+		copy_modes.push_back("\n#define MODE_GAUSSIAN_BLUR\n#define DST_IMAGE_8BIT\n" COPY_SHADER_SOURCE_PLUS_DEST);
+		copy_modes.push_back("\n#define MODE_GAUSSIAN_BLUR\n#define MODE_GLOW\n" COPY_SHADER_SOURCE_PLUS_DEST);
+		copy_modes.push_back("\n#define MODE_GAUSSIAN_BLUR\n#define MODE_GLOW\n#define GLOW_USE_AUTO_EXPOSURE\n" COPY_SHADER_ALL_3);
+		copy_modes.push_back("\n#define MODE_SIMPLE_COPY\n" COPY_SHADER_SOURCE_PLUS_DEST);
+		copy_modes.push_back("\n#define MODE_SIMPLE_COPY\n#define DST_IMAGE_8BIT\n" COPY_SHADER_SOURCE_PLUS_DEST);
+		copy_modes.push_back("\n#define MODE_SIMPLE_COPY_DEPTH\n" COPY_SHADER_SOURCE_PLUS_DEST);
+		copy_modes.push_back("\n#define MODE_SET_COLOR\n" COPY_SHADER_DEST_ONLY);
+		copy_modes.push_back("\n#define MODE_SET_COLOR\n#define DST_IMAGE_8BIT\n" COPY_SHADER_DEST_ONLY);
+		copy_modes.push_back("\n#define MODE_MIPMAP\n" COPY_SHADER_SOURCE_PLUS_DEST);
+		copy_modes.push_back("\n#define MODE_LINEARIZE_DEPTH_COPY\n" COPY_SHADER_SOURCE_PLUS_DEST);
+		copy_modes.push_back("\n#define MODE_CUBEMAP_TO_PANORAMA\n" COPY_SHADER_SOURCE_PLUS_DEST);
+		copy_modes.push_back("\n#define MODE_CUBEMAP_ARRAY_TO_PANORAMA\n" COPY_SHADER_SOURCE_PLUS_DEST);
 
 		Vector<uint64_t> dynamic_buffers;
-		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(2, 0)); // params_uniform_buffer.
+		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(copy.push_constant.set_idx(), 0));
 
 		copy.shader.initialize(copy_modes, "", Vector<RD::PipelineImmutableSampler>(), dynamic_buffers);
 		copy.shader_version = copy.shader.version_create();
@@ -130,7 +140,7 @@ CopyEffects::CopyEffects(bool p_prefer_raster_effects) {
 		copy_modes.push_back("\n#define USE_MULTIVIEW\n#define MODE_TWO_SOURCES\n"); // COPY_TO_FB_MULTIVIEW_WITH_DEPTH
 
 		Vector<uint64_t> dynamic_buffers;
-		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(2, 0)); // params_uniform_buffer.
+		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(copy_to_fb.push_constant.set_idx(), 0));
 
 		copy_to_fb.shader.initialize(copy_modes, "", Vector<RD::PipelineImmutableSampler>(), dynamic_buffers);
 
@@ -165,7 +175,7 @@ CopyEffects::CopyEffects(bool p_prefer_raster_effects) {
 		copy_modes.push_back("\n");
 
 		Vector<uint64_t> dynamic_buffers;
-		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(2, 0)); // params_uniform_buffer.
+		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(cube_to_dp.push_constant.set_idx(), 0));
 
 		cube_to_dp.shader.initialize(copy_modes, "", Vector<RD::PipelineImmutableSampler>(), dynamic_buffers);
 
@@ -413,20 +423,23 @@ void CopyEffects::copy_to_rect(RID p_source_rd_texture, RID p_dest_texture, cons
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
 	RD::Uniform u_source_rd_texture(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_source_rd_texture }));
-	RD::Uniform u_dest_texture(RD::UNIFORM_TYPE_IMAGE, 0, p_dest_texture);
+	RD::Uniform u_dest_texture(RD::UNIFORM_TYPE_IMAGE, 1, p_dest_texture);
+
+	uniforms.clear();
+	uniforms.push_back(u_source_rd_texture);
+	uniforms.push_back(u_dest_texture);
 
 	CopyMode mode = p_8_bit_dst ? COPY_MODE_SIMPLY_COPY_8BIT : COPY_MODE_SIMPLY_COPY;
 	RID shader = copy.shader.version_get_shader(copy.shader_version, mode);
 	ERR_FAIL_COND(shader.is_null());
 
 	// Update buffer and uniform set
-	const PushConstantsEmu<CopyPushConstant>::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, copy.pipelines[mode]);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_source_rd_texture), 0);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 2);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 3, u_dest_texture), 3);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(shader, 0, uniforms), 0);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 1);
 	RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_rect.size.width, p_rect.size.height, 1);
 	RD::get_singleton()->compute_list_end();
 }
@@ -451,20 +464,23 @@ void CopyEffects::copy_cubemap_to_panorama(RID p_source_cube, RID p_dest_panoram
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
 	RD::Uniform u_source_cube(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_source_cube }));
-	RD::Uniform u_dest_panorama(RD::UNIFORM_TYPE_IMAGE, 0, p_dest_panorama);
+	RD::Uniform u_dest_panorama(RD::UNIFORM_TYPE_IMAGE, 1, p_dest_panorama);
+
+	uniforms.clear();
+	uniforms.push_back(u_source_cube);
+	uniforms.push_back(u_dest_panorama);
 
 	CopyMode mode = p_is_array ? COPY_MODE_CUBE_ARRAY_TO_PANORAMA : COPY_MODE_CUBE_TO_PANORAMA;
 	RID shader = copy.shader.version_get_shader(copy.shader_version, mode);
 	ERR_FAIL_COND(shader.is_null());
 
 	// Update buffer and uniform set
-	const PushConstantsEmu<CopyPushConstant>::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, copy.pipelines[mode]);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_source_cube), 0);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 2);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 3, u_dest_panorama), 3);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(shader, 0, uniforms), 0);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 1);
 	RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_panorama_size.width, p_panorama_size.height, 1);
 	RD::get_singleton()->compute_list_end();
 }
@@ -491,20 +507,23 @@ void CopyEffects::copy_depth_to_rect(RID p_source_rd_texture, RID p_dest_texture
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
 	RD::Uniform u_source_rd_texture(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_source_rd_texture }));
-	RD::Uniform u_dest_texture(RD::UNIFORM_TYPE_IMAGE, 0, p_dest_texture);
+	RD::Uniform u_dest_texture(RD::UNIFORM_TYPE_IMAGE, 1, p_dest_texture);
+
+	uniforms.clear();
+	uniforms.push_back(u_source_rd_texture);
+	uniforms.push_back(u_dest_texture);
 
 	CopyMode mode = COPY_MODE_SIMPLY_COPY_DEPTH;
 	RID shader = copy.shader.version_get_shader(copy.shader_version, mode);
 	ERR_FAIL_COND(shader.is_null());
 
 	// Update buffer and uniform set
-	const PushConstantsEmu<CopyPushConstant>::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, copy.pipelines[mode]);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_source_rd_texture), 0);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 2);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 3, u_dest_texture), 3);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(shader, 0, uniforms), 0);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 1);
 	RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_rect.size.width, p_rect.size.height, 1);
 	RD::get_singleton()->compute_list_end();
 }
@@ -534,20 +553,23 @@ void CopyEffects::copy_depth_to_rect_and_linearize(RID p_source_rd_texture, RID 
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
 	RD::Uniform u_source_rd_texture(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_source_rd_texture }));
-	RD::Uniform u_dest_texture(RD::UNIFORM_TYPE_IMAGE, 0, p_dest_texture);
+	RD::Uniform u_dest_texture(RD::UNIFORM_TYPE_IMAGE, 1, p_dest_texture);
+
+	uniforms.clear();
+	uniforms.push_back(u_source_rd_texture);
+	uniforms.push_back(u_dest_texture);
 
 	CopyMode mode = COPY_MODE_LINEARIZE_DEPTH;
 	RID shader = copy.shader.version_get_shader(copy.shader_version, mode);
 	ERR_FAIL_COND(shader.is_null());
 
 	// Update buffer and uniform set
-	const PushConstantsEmu<CopyPushConstant>::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, copy.pipelines[mode]);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_source_rd_texture), 0);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 2);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 3, u_dest_texture), 3);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(shader, 0, uniforms), 0);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 1);
 	RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_rect.size.width, p_rect.size.height, 1);
 	RD::get_singleton()->compute_list_end();
 }
@@ -581,12 +603,12 @@ void CopyEffects::copy_to_atlas_fb(RID p_source_rd_texture, RID p_dest_framebuff
 	RID shader = copy_to_fb.shader.version_get_shader(copy_to_fb.shader_version, mode);
 	ERR_FAIL_COND(shader.is_null());
 
-	const PushConstantsEmu<CopyToFbPushConstant>::ParamsUniform params_uniform = copy_to_fb.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = copy_to_fb.push_constant.upload_and_advance(push_constant);
 
 	RD::DrawListID draw_list = p_draw_list;
 	RD::get_singleton()->draw_list_bind_render_pipeline(draw_list, copy_to_fb.pipelines[mode].get_render_pipeline(RD::INVALID_ID, RD::get_singleton()->framebuffer_get_format(p_dest_framebuffer)));
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 0, u_source_rd_texture), 0);
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 2);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 1);
 	RD::get_singleton()->draw_list_bind_index_array(draw_list, material_storage->get_quad_index_array());
 	RD::get_singleton()->draw_list_draw(draw_list, true);
 }
@@ -649,17 +671,20 @@ void CopyEffects::copy_to_fb_rect(RID p_source_rd_texture, RID p_dest_framebuffe
 	RID shader = copy_to_fb.shader.version_get_shader(copy_to_fb.shader_version, mode);
 	ERR_FAIL_COND(shader.is_null());
 
-	const PushConstantsEmu<CopyToFbPushConstant>::ParamsUniform params_uniform = copy_to_fb.push_constant.upload_and_advance(push_constant);
+	uniforms.clear();
+	uniforms.push_back(u_source_rd_texture);
+	if (p_secondary.is_valid()) {
+		// TODO may need to do this differently when reading from depth buffer for multiview
+		RD::Uniform u_secondary(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, Vector<RID>({ default_sampler, p_secondary }));
+		uniforms.push_back(u_secondary);
+	}
+
+	const PushConstantsEmuBase::ParamsUniform params_uniform = copy_to_fb.push_constant.upload_and_advance(push_constant);
 
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(p_dest_framebuffer, RD::DRAW_DEFAULT_ALL, Vector<Color>(), 1.0f, 0, p_rect);
 	RD::get_singleton()->draw_list_bind_render_pipeline(draw_list, copy_to_fb.pipelines[mode].get_render_pipeline(RD::INVALID_ID, RD::get_singleton()->framebuffer_get_format(p_dest_framebuffer)));
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 0, u_source_rd_texture), 0);
-	if (p_secondary.is_valid()) {
-		// TODO may need to do this differently when reading from depth buffer for multiview
-		RD::Uniform u_secondary(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_secondary }));
-		RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 1, u_secondary), 1);
-	}
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 2);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache_vec(shader, 0, uniforms), 0);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 1);
 	RD::get_singleton()->draw_list_bind_index_array(draw_list, material_storage->get_quad_index_array());
 	RD::get_singleton()->draw_list_draw(draw_list, true);
 	RD::get_singleton()->draw_list_end();
@@ -692,11 +717,11 @@ void CopyEffects::copy_to_drawlist(RD::DrawListID p_draw_list, RD::FramebufferFo
 	RID shader = copy_to_fb.shader.version_get_shader(copy_to_fb.shader_version, mode);
 	ERR_FAIL_COND(shader.is_null());
 
-	const PushConstantsEmu<CopyToFbPushConstant>::ParamsUniform params_uniform = copy_to_fb.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = copy_to_fb.push_constant.upload_and_advance(push_constant);
 
 	RD::get_singleton()->draw_list_bind_render_pipeline(p_draw_list, copy_to_fb.pipelines[mode].get_render_pipeline(RD::INVALID_ID, p_fb_format));
 	RD::get_singleton()->draw_list_bind_uniform_set(p_draw_list, uniform_set_cache->get_cache(shader, 0, u_source_rd_texture), 0);
-	RD::get_singleton()->draw_list_bind_uniform_set(p_draw_list, params_uniform.set, 2);
+	RD::get_singleton()->draw_list_bind_uniform_set(p_draw_list, params_uniform.set, 1);
 	RD::get_singleton()->draw_list_bind_index_array(p_draw_list, material_storage->get_quad_index_array());
 	RD::get_singleton()->draw_list_draw(p_draw_list, true);
 }
@@ -713,7 +738,7 @@ void CopyEffects::copy_raster(RID p_source_texture, RID p_dest_framebuffer) {
 	// @ShadyTF
 	// replace push constants with UBO
 	BlurRasterPushConstant push_constant{};
-	const PushConstantsEmu<BlurRasterPushConstant>::ParamsUniform params_uniform = blur_raster.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = blur_raster.push_constant.upload_and_advance(push_constant);
 	// </TF>
 
 	// setup our uniforms
@@ -734,7 +759,7 @@ void CopyEffects::copy_raster(RID p_source_texture, RID p_dest_framebuffer) {
 	// replace push constants with UBO
 	// Was:
 	//	RD::get_singleton()->draw_list_set_push_constant(draw_list, &blur_raster.push_constant, sizeof(BlurRasterPushConstant));
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 2);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 1);
 	// </TF>
 
 	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);
@@ -762,20 +787,23 @@ void CopyEffects::gaussian_blur(RID p_source_rd_texture, RID p_texture, const Re
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
 	RD::Uniform u_source_rd_texture(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_source_rd_texture }));
-	RD::Uniform u_texture(RD::UNIFORM_TYPE_IMAGE, 0, p_texture);
+	RD::Uniform u_texture(RD::UNIFORM_TYPE_IMAGE, 1, p_texture);
+
+	uniforms.clear();
+	uniforms.push_back(u_source_rd_texture);
+	uniforms.push_back(u_texture);
 
 	CopyMode mode = p_8bit_dst ? COPY_MODE_GAUSSIAN_COPY_8BIT : COPY_MODE_GAUSSIAN_COPY;
 	RID shader = copy.shader.version_get_shader(copy.shader_version, mode);
 	ERR_FAIL_COND(shader.is_null());
 
 	// Update buffer and uniform set
-	const PushConstantsEmu<CopyPushConstant>::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
 
 	RD::DrawListID compute_list = RD::get_singleton()->compute_list_begin();
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, copy.pipelines[mode]);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_source_rd_texture), 0);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 2);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 3, u_texture), 3);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(shader, 0, uniforms), 0);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 1);
 
 	RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_region.size.width, p_region.size.height, 1);
 
@@ -801,7 +829,7 @@ void CopyEffects::gaussian_blur_raster(RID p_source_rd_texture, RID p_dest_textu
 	// <TF>
 	// @ShadyTF
 	// replace push constants with UBO
-	const PushConstantsEmu<BlurRasterPushConstant>::ParamsUniform params_uniform = blur_raster.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = blur_raster.push_constant.upload_and_advance(push_constant);
 	// </TF>
 
 	// setup our uniforms
@@ -821,7 +849,7 @@ void CopyEffects::gaussian_blur_raster(RID p_source_rd_texture, RID p_dest_textu
 	// replace push constants with UBO
 	// Was:
 	//	RD::get_singleton()->draw_list_set_push_constant(draw_list, &blur_raster.push_constant, sizeof(BlurRasterPushConstant));
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 2);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 1);
 	// </TF>
 
 	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);
@@ -859,23 +887,26 @@ void CopyEffects::gaussian_glow(RID p_source_rd_texture, RID p_back_texture, con
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
 	RD::Uniform u_source_rd_texture(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_source_rd_texture }));
-	RD::Uniform u_back_texture(RD::UNIFORM_TYPE_IMAGE, 0, p_back_texture);
+	RD::Uniform u_back_texture(RD::UNIFORM_TYPE_IMAGE, 1, p_back_texture);
+
+	uniforms.clear();
+	uniforms.push_back(u_source_rd_texture);
+	uniforms.push_back(u_back_texture);
+	if (p_auto_exposure.is_valid() && p_first_pass) {
+		RD::Uniform u_auto_exposure(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, Vector<RID>({ default_sampler, p_auto_exposure }));
+		uniforms.push_back(u_auto_exposure);
+	}
 
 	RID shader = copy.shader.version_get_shader(copy.shader_version, copy_mode);
 	ERR_FAIL_COND(shader.is_null());
 
 	// Update buffer and uniform set
-	const PushConstantsEmu<CopyPushConstant>::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, copy.pipelines[copy_mode]);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_source_rd_texture), 0);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 2);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 3, u_back_texture), 3);
-	if (p_auto_exposure.is_valid() && p_first_pass) {
-		RD::Uniform u_auto_exposure(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_auto_exposure }));
-		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 1, u_auto_exposure), 1);
-	}
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(shader, 0, uniforms), 0);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 1);
 	RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_size.width, p_size.height, 1);
 	RD::get_singleton()->compute_list_end();
 }
@@ -919,27 +950,30 @@ void CopyEffects::gaussian_glow_raster(RID p_source_rd_texture, RID p_half_textu
 	RID shader = blur_raster.shader.version_get_shader(blur_raster.shader_version, blur_mode);
 	ERR_FAIL_COND(shader.is_null());
 
+	uniforms.clear();
+	uniforms.push_back(u_source_rd_texture);
+	if (p_auto_exposure.is_valid() && p_first_pass) {
+		RD::Uniform u_auto_exposure(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, Vector<RID>({ default_sampler, p_auto_exposure }));
+		uniforms.push_back(u_auto_exposure);
+	}
+
 	//HORIZONTAL
 	// <TF>
 	// @ShadyTF
 	// replace push constants with UBO
 	push_constant.flags = base_flags | BLUR_FLAG_HORIZONTAL | (p_first_pass ? BLUR_FLAG_GLOW_FIRST_PASS : 0);
-	PushConstantsEmu<BlurRasterPushConstant>::ParamsUniform params_uniform = blur_raster.push_constant.upload_and_advance(push_constant);
+	PushConstantsEmuBase::ParamsUniform params_uniform = blur_raster.push_constant.upload_and_advance(push_constant);
 	// </TF>
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(half_framebuffer);
 	RD::get_singleton()->draw_list_bind_render_pipeline(draw_list, blur_raster.pipelines[blur_mode].get_render_pipeline(RD::INVALID_ID, RD::get_singleton()->framebuffer_get_format(half_framebuffer)));
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 0, u_source_rd_texture), 0);
-	if (p_auto_exposure.is_valid() && p_first_pass) {
-		RD::Uniform u_auto_exposure(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_auto_exposure }));
-		RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 1, u_auto_exposure), 1);
-	}
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache_vec(shader, 0, uniforms), 0);
 	// <TF>
 	// @ShadyTF
 	// replace push constants with UBO
 	// was:
 	//blur_raster.push_constant.flags = base_flags | BLUR_FLAG_HORIZONTAL | (p_first_pass ? BLUR_FLAG_GLOW_FIRST_PASS : 0);
 	//RD::get_singleton()->draw_list_set_push_constant(draw_list, &blur_raster.push_constant, sizeof(BlurRasterPushConstant));
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 2);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 1);
 	// </TF>
 	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);
 	RD::get_singleton()->draw_list_end();
@@ -965,7 +999,7 @@ void CopyEffects::gaussian_glow_raster(RID p_source_rd_texture, RID p_half_textu
 	// Was:
 	//blur_raster.push_constant.flags = base_flags;
 	//RD::get_singleton()->draw_list_set_push_constant(draw_list, &blur_raster.push_constant, sizeof(BlurRasterPushConstant));
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 2);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 1);
 	// </TF>
 	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);
 	RD::get_singleton()->draw_list_end();
@@ -990,20 +1024,23 @@ void CopyEffects::make_mipmap(RID p_source_rd_texture, RID p_dest_texture, const
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
 	RD::Uniform u_source_rd_texture(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_source_rd_texture }));
-	RD::Uniform u_dest_texture(RD::UNIFORM_TYPE_IMAGE, 0, p_dest_texture);
+	RD::Uniform u_dest_texture(RD::UNIFORM_TYPE_IMAGE, 1, p_dest_texture);
+
+	uniforms.clear();
+	uniforms.push_back(u_source_rd_texture);
+	uniforms.push_back(u_dest_texture);
 
 	CopyMode mode = COPY_MODE_MIPMAP;
 	RID shader = copy.shader.version_get_shader(copy.shader_version, mode);
 	ERR_FAIL_COND(shader.is_null());
 
 	// Update buffer and uniform set
-	const PushConstantsEmu<CopyPushConstant>::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, copy.pipelines[mode]);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_source_rd_texture), 0);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 2);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 3, u_dest_texture), 3);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(shader, 0, uniforms), 0);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 1);
 	RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_size.width, p_size.height, 1);
 	RD::get_singleton()->compute_list_end();
 }
@@ -1023,7 +1060,7 @@ void CopyEffects::make_mipmap_raster(RID p_source_rd_texture, RID p_dest_texture
 	BlurRasterPushConstant push_constant{};
 	push_constant.pixel_size[0] = 1.0f / float(p_size.x);
 	push_constant.pixel_size[1] = 1.0f / float(p_size.y);
-	const PushConstantsEmu<BlurRasterPushConstant>::ParamsUniform params_uniform = blur_raster.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = blur_raster.push_constant.upload_and_advance(push_constant);
 
 	// setup our uniforms
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
@@ -1036,7 +1073,7 @@ void CopyEffects::make_mipmap_raster(RID p_source_rd_texture, RID p_dest_texture
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(dest_framebuffer);
 	RD::get_singleton()->draw_list_bind_render_pipeline(draw_list, blur_raster.pipelines[mode].get_render_pipeline(RD::INVALID_ID, RD::get_singleton()->framebuffer_get_format(dest_framebuffer)));
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 0, u_source_rd_texture), 0);
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 2);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 1);
 	RD::get_singleton()->draw_list_bind_index_array(draw_list, material_storage->get_quad_index_array());
 
 	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);
@@ -1070,12 +1107,12 @@ void CopyEffects::set_color(RID p_dest_texture, const Color &p_color, const Rect
 	ERR_FAIL_COND(shader.is_null());
 
 	// Update buffer and uniform set
-	const PushConstantsEmu<CopyPushConstant>::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = copy.push_constant.upload_and_advance(push_constant);
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, copy.pipelines[mode]);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 2);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 3, u_dest_texture), 3);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_dest_texture), 0);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params_uniform.set, 1);
 	RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_region.size.width, p_region.size.height, 1);
 	RD::get_singleton()->compute_list_end();
 }
@@ -1102,11 +1139,11 @@ void CopyEffects::set_color_raster(RID p_dest_texture, const Color &p_color, con
 	RID shader = copy_to_fb.shader.version_get_shader(copy_to_fb.shader_version, mode);
 	ERR_FAIL_COND(shader.is_null());
 
-	const PushConstantsEmu<CopyToFbPushConstant>::ParamsUniform params_uniform = copy_to_fb.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = copy_to_fb.push_constant.upload_and_advance(push_constant);
 
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(dest_framebuffer, RD::DRAW_DEFAULT_ALL, Vector<Color>(), 1.0f, 0, p_region);
 	RD::get_singleton()->draw_list_bind_render_pipeline(draw_list, copy_to_fb.pipelines[mode].get_render_pipeline(RD::INVALID_ID, RD::get_singleton()->framebuffer_get_format(dest_framebuffer)));
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 2);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 1);
 	RD::get_singleton()->draw_list_bind_index_array(draw_list, material_storage->get_quad_index_array());
 	RD::get_singleton()->draw_list_draw(draw_list, true);
 	RD::get_singleton()->draw_list_end();
@@ -1133,7 +1170,7 @@ void CopyEffects::copy_cubemap_to_dp(RID p_source_rd_texture, RID p_dst_framebuf
 	push_constant.texel_size[1] = 1.0f / p_dst_size.height;
 	push_constant.texel_size[0] *= p_dp_flip ? -1.0f : 1.0f; // Encode dp flip as x size sign
 
-	const PushConstantsEmu<CopyToDPPushConstant>::ParamsUniform params_uniform = cube_to_dp.push_constant.upload_and_advance(push_constant);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = cube_to_dp.push_constant.upload_and_advance(push_constant);
 
 	// setup our uniforms
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
@@ -1153,7 +1190,7 @@ void CopyEffects::copy_cubemap_to_dp(RID p_source_rd_texture, RID p_dst_framebuf
 	// replace push constants with UBO
 	// Was:
 	//RD::get_singleton()->draw_list_set_push_constant(draw_list, &push_constant, sizeof(CopyToDPPushConstant));
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 2);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 1);
 	// </TF>
 	RD::get_singleton()->draw_list_draw(draw_list, true);
 	RD::get_singleton()->draw_list_end();
@@ -1174,15 +1211,18 @@ void CopyEffects::cubemap_downsample(RID p_source_cubemap, RID p_dest_cubemap, c
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
 	RD::Uniform u_source_cubemap(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_source_cubemap }));
-	RD::Uniform u_dest_cubemap(RD::UNIFORM_TYPE_IMAGE, 0, Vector<RID>({ p_dest_cubemap }));
+	RD::Uniform u_dest_cubemap(RD::UNIFORM_TYPE_IMAGE, 1, Vector<RID>({ p_dest_cubemap }));
+
+	uniforms.clear();
+	uniforms.push_back(u_source_cubemap);
+	uniforms.push_back(u_dest_cubemap);
 
 	RID shader = cubemap_downsampler.compute_shader.version_get_shader(cubemap_downsampler.shader_version, 0);
 	ERR_FAIL_COND(shader.is_null());
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, cubemap_downsampler.compute_pipeline);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_source_cubemap), 0);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 1, u_dest_cubemap), 1);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(shader, 0, uniforms), 0);
 
 	int x_groups = Math::division_round_up(p_size.x, 8);
 	int y_groups = Math::division_round_up(p_size.y, 8);
@@ -1325,7 +1365,11 @@ void CopyEffects::cubemap_roughness(RID p_source_rd_texture, RID p_dest_texture,
 	RID default_mipmap_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
 	RD::Uniform u_source_rd_texture(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_mipmap_sampler, p_source_rd_texture }));
-	RD::Uniform u_dest_texture(RD::UNIFORM_TYPE_IMAGE, 0, Vector<RID>({ p_dest_texture }));
+	RD::Uniform u_dest_texture(RD::UNIFORM_TYPE_IMAGE, 1, Vector<RID>({ p_dest_texture }));
+
+	uniforms.clear();
+	uniforms.push_back(u_source_rd_texture);
+	uniforms.push_back(u_dest_texture);
 
 	RID shader = roughness.compute_shader.version_get_shader(roughness.shader_version, 0);
 	ERR_FAIL_COND(shader.is_null());
@@ -1333,8 +1377,7 @@ void CopyEffects::cubemap_roughness(RID p_source_rd_texture, RID p_dest_texture,
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, roughness.compute_pipeline);
 
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_source_rd_texture), 0);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 1, u_dest_texture), 1);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(shader, 0, uniforms), 0);
 
 	RD::get_singleton()->compute_list_set_push_constant(compute_list, &roughness.push_constant, sizeof(CubemapRoughnessPushConstant));
 

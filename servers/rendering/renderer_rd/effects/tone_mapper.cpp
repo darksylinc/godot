@@ -55,7 +55,7 @@ ToneMapper::ToneMapper() {
 		tonemap_modes.push_back("\n#define USE_MULTIVIEW\n#define SUBPASS\n#define USE_1D_LUT\n");
 
 		Vector<uint64_t> dynamic_buffers;
-		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(1, 0)); // params_uniform_buffer.
+		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(tonemap.push_constant.set_idx(), 0));
 
 		tonemap.shader.initialize(tonemap_modes, "", Vector<RD::PipelineImmutableSampler>(), dynamic_buffers);
 
@@ -139,7 +139,7 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 
 	push_constant.flags |= p_settings.convert_to_srgb ? TONEMAP_FLAG_CONVERT_TO_SRGB : 0;
 
-	PushConstantsEmu<TonemapPushConstant, 1u>::ParamsUniform params_uniform = tonemap.push_constant.upload_and_advance(push_constant);
+	PushConstantsEmuBase::ParamsUniform params_uniform = tonemap.push_constant.upload_and_advance(push_constant);
 
 	if (p_settings.view_count > 1) {
 		// Use USE_MULTIVIEW versions
@@ -246,7 +246,7 @@ void ToneMapper::tonemapper(RD::DrawListID p_subpass_draw_list, RID p_source_col
 
 	push_constant.flags |= p_settings.convert_to_srgb ? TONEMAP_FLAG_CONVERT_TO_SRGB : 0;
 
-	PushConstantsEmu<TonemapPushConstant, 4u>::ParamsUniform params_uniform = tonemap.push_constant.upload_and_advance(push_constant);
+	PushConstantsEmuBase::ParamsUniform params_uniform = tonemap.push_constant.upload_and_advance(push_constant);
 
 	RID default_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	RID default_mipmap_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);

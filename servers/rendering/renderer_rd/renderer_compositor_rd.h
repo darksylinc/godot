@@ -98,7 +98,7 @@ protected:
 		// <TF>
 		// @ShadyTF
 		// replace push constants with UBO
-		RendererRD::PushConstantsEmu<BlitPushConstant, 2u, 2u> push_constant = { "RendererCompositorRD::blit" };
+		RendererRD::PushConstantsEmu<BlitPushConstant, 1u, 2u> push_constant = { "RendererCompositorRD::blit" };
 		// </TF>
 	} blit;
 

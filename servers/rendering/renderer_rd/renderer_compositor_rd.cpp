@@ -98,14 +98,14 @@ void RendererCompositorRD::blit_render_targets_to_screen(DisplayServer::WindowID
 		push_constant.aspect_ratio = p_render_targets[i].lens_distortion.aspect_ratio;
 		push_constant.convert_to_srgb = texture_storage->render_target_is_using_hdr(p_render_targets[i].render_target);
 
-		const auto params_uniform = blit.push_constant.upload_and_advance(push_constant);
+		const RendererRD::PushConstantsEmuBase::ParamsUniform params_uniform = blit.push_constant.upload_and_advance(push_constant);
 
 		// <TF>
 		// @ShadyTF
 		// replace push constants with UBO
 		// Was:
 		//RD::get_singleton()->draw_list_set_push_constant(draw_list, &blit.push_constant, sizeof(BlitPushConstant));
-		RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 2);
+		RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 1);
 		// </TF>
 
 		RD::get_singleton()->draw_list_draw(draw_list, true);
@@ -140,7 +140,7 @@ void RendererCompositorRD::initialize() {
 		blit_modes.push_back("\n");
 
 		Vector<uint64_t> dynamic_buffers;
-		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(2, 0)); // params_uniform_buffer.
+		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(blit.push_constant.set_idx(), 0));
 
 		blit.shader.initialize(blit_modes, "", Vector<RD::PipelineImmutableSampler>(), dynamic_buffers);
 
@@ -283,7 +283,7 @@ void RendererCompositorRD::set_boot_image(const Ref<Image> &p_image, const Color
 	push_constant.aspect_ratio = 1.0;
 	push_constant.convert_to_srgb = false;
 
-	const auto params_uniform = blit.push_constant.upload_and_advance(push_constant);
+	const RendererRD::PushConstantsEmuBase::ParamsUniform params_uniform = blit.push_constant.upload_and_advance(push_constant);
 	// </TF>
 
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin_for_screen(DisplayServer::MAIN_WINDOW_ID, p_color);
@@ -292,7 +292,7 @@ void RendererCompositorRD::set_boot_image(const Ref<Image> &p_image, const Color
 	RD::get_singleton()->draw_list_bind_index_array(draw_list, blit.array);
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uset, 0);
 
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 2);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, params_uniform.set, 1);
 	// </TF>
 	RD::get_singleton()->draw_list_draw(draw_list, true);
 

@@ -274,7 +274,7 @@ void SkyRD::_render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineC
 	sky_push_constant.brightness_multiplier = p_brightness_multiplier;
 	store_transform_3x3(p_orientation, sky_push_constant.orientation);
 
-	const PushConstantsEmuEmbedded<SkyPushConstant, SkyRD, 6u>::ParamsUniform params_uniform = sky_scene_state.push_constant.upload_and_advance(sky_push_constant, this);
+	const PushConstantsEmuBase::ParamsUniform params_uniform = sky_scene_state.push_constant.upload_and_advance(sky_push_constant, this);
 
 	RenderingDevice::FramebufferFormatID fb_format = RD::get_singleton()->framebuffer_get_format(p_fb);
 
@@ -815,7 +815,7 @@ void SkyRD::init() {
 		sky_modes.push_back("\n#define USE_QUARTER_RES_PASS\n#define USE_MULTIVIEW\n"); // Quarter res multiview
 
 		Vector<uint64_t> dynamic_buffers;
-		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(0, 0)); // params_uniform_buffer.
+		dynamic_buffers.push_back(RDD::DynamicBuffer::encode(0, 0)); // sky_scene_state.push_constant.
 
 		sky_shader.shader.initialize(sky_modes, defines, Vector<RD::PipelineImmutableSampler>(), dynamic_buffers);
 

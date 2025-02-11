@@ -32,7 +32,7 @@ layout(location = 0) out vec2 uv_interp;
 // <TF>
 // @ShadyTF
 // replace push constants with UBO
-layout(set = 2, binding = 0, std140) uniform Params {
+layout(set = 1, binding = 0, std140) uniform Params {
 	vec4 section;
 	vec2 pixel_size;
 	float luminance_multiplier;
@@ -92,7 +92,7 @@ void main() {
 // <TF>
 // @ShadyTF
 // replace push constants with UBO
-layout(set = 4, binding = 0, std140) uniform Params {
+layout(set = 1, binding = 0, std140) uniform Params {
 	vec4 section;
 	vec2 pixel_size;
 	float luminance_multiplier;
@@ -113,13 +113,13 @@ layout(location = 0) in vec2 uv_interp;
 #ifdef USE_MULTIVIEW
 layout(set = 0, binding = 0) uniform sampler2DArray source_color;
 #ifdef MODE_TWO_SOURCES
-layout(set = 1, binding = 0) uniform sampler2DArray source_depth;
+layout(set = 0, binding = 1) uniform sampler2DArray source_depth;
 layout(location = 1) out float depth;
 #endif /* MODE_TWO_SOURCES */
 #else /* USE_MULTIVIEW */
 layout(set = 0, binding = 0) uniform sampler2D source_color;
 #ifdef MODE_TWO_SOURCES
-layout(set = 1, binding = 0) uniform sampler2D source_color2;
+layout(set = 0, binding = 1) uniform sampler2D source_color2;
 #endif /* MODE_TWO_SOURCES */
 #endif /* USE_MULTIVIEW */
 #endif /* !SET_COLOR */
