@@ -692,7 +692,7 @@ void RenderForwardClustered::_setup_environment(const RenderDataRD *p_render_dat
 		uint32_t from = scene_state.uniform_buffers.size();
 		scene_state.uniform_buffers.resize(p_index + 1);
 		for (uint32_t i = from; i < scene_state.uniform_buffers.size(); i++) {
-			scene_state.uniform_buffers[i] = p_render_data->scene_data->create_uniform_buffer(false);
+			scene_state.uniform_buffers[i] = p_render_data->scene_data->create_uniform_buffer();
 		}
 	}
 

@@ -173,6 +173,9 @@ private:
 	void _setup_environment(const RenderDataRD *p_render_data, bool p_no_fog, const Size2i &p_screen_size, const Color &p_default_bg_color, bool p_opaque_render_buffers = false, bool p_pancake_shadows = false);
 	void _setup_lightmaps(const RenderDataRD *p_render_data, const PagedArray<RID> &p_lightmaps, const Transform3D &p_cam_transform);
 
+#ifdef DEV_ENABLED
+	uint32_t debug_light_buffer_idx = UINT32_MAX;
+#endif
 	RID render_base_uniform_set;
 	LocalVector<RID> render_pass_uniform_sets;
 
@@ -192,8 +195,7 @@ private:
 	/* Scene state */
 
 	struct SceneState {
-		LocalVector<RID> uniform_buffers;
-		uint32_t curr_uniform_buf_idx = UINT32_MAX;
+		MultiUmaBuffer<1u> uniform_buffers = MultiUmaBuffer<1u>("SceneState::uniform_buffers");
 
 		struct PushConstantUbershader {
 			SceneShaderForwardMobile::ShaderSpecialization specialization;

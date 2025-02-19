@@ -1659,6 +1659,8 @@ public:
 	String get_device_api_version() const;
 	String get_device_pipeline_cache_uuid() const;
 
+	uint64_t get_frames_drawn() const { return frames_drawn; }
+
 	bool is_composite_alpha_supported() const;
 
 	uint64_t get_driver_resource(DriverResource p_resource, RID p_rid = RID(), uint64_t p_index = 0);
