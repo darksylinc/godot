@@ -58,16 +58,16 @@ layout(set = 0, binding = 0) uniform sampler2D source_color;
 
 layout(set = 0, binding = 1) uniform sampler2D source_auto_exposure;
 #ifdef USE_MULTIVIEW
-layout(set = 0, binding = 1) uniform sampler2DArray source_glow;
+layout(set = 0, binding = 2) uniform sampler2DArray source_glow;
 #else
-layout(set = 0, binding = 1) uniform sampler2D source_glow;
+layout(set = 0, binding = 2) uniform sampler2D source_glow;
 #endif
-layout(set = 0, binding = 2) uniform sampler2D glow_map;
+layout(set = 0, binding = 3) uniform sampler2D glow_map;
 
 #ifdef USE_1D_LUT
-layout(set = 0, binding = 3) uniform sampler2D source_color_correction;
+layout(set = 0, binding = 4) uniform sampler2D source_color_correction;
 #else
-layout(set = 0, binding = 3) uniform sampler3D source_color_correction;
+layout(set = 0, binding = 4) uniform sampler3D source_color_correction;
 #endif
 
 #define FLAG_USE_BCS (1 << 0)

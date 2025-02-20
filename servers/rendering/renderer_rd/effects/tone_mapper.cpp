@@ -160,7 +160,7 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	{
 		RD::Uniform u_exposure_texture;
 		u_exposure_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-		u_exposure_texture.binding = 0;
+		u_exposure_texture.binding = 1;
 		u_exposure_texture.append_id(default_sampler);
 		u_exposure_texture.append_id(p_settings.exposure_texture);
 		uniforms.push_back(u_exposure_texture);
@@ -169,7 +169,7 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	{
 		RD::Uniform u_glow_texture;
 		u_glow_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-		u_glow_texture.binding = 1;
+		u_glow_texture.binding = 2;
 		u_glow_texture.append_id(default_mipmap_sampler);
 		u_glow_texture.append_id(p_settings.glow_texture);
 		uniforms.push_back(u_glow_texture);
@@ -178,7 +178,7 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	{
 		RD::Uniform u_glow_map;
 		u_glow_map.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-		u_glow_map.binding = 2;
+		u_glow_map.binding = 3;
 		u_glow_map.append_id(default_mipmap_sampler);
 		u_glow_map.append_id(p_settings.glow_map);
 		uniforms.push_back(u_glow_map);
@@ -187,7 +187,7 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	{
 		RD::Uniform u_color_correction_texture;
 		u_color_correction_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-		u_color_correction_texture.binding = 3;
+		u_color_correction_texture.binding = 4;
 		u_color_correction_texture.append_id(default_sampler);
 		u_color_correction_texture.append_id(p_settings.color_correction_texture);
 		uniforms.push_back(u_color_correction_texture);
@@ -289,11 +289,14 @@ void ToneMapper::tonemapper(RD::DrawListID p_subpass_draw_list, RID p_source_col
 		uniforms.push_back(u_glow_map);
 	}
 
-	RD::Uniform u_color_correction_texture;
-	u_color_correction_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-	u_color_correction_texture.binding = 0;
-	u_color_correction_texture.append_id(default_sampler);
-	u_color_correction_texture.append_id(p_settings.color_correction_texture);
+	{
+		RD::Uniform u_color_correction_texture;
+		u_color_correction_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+		u_color_correction_texture.binding = 4;
+		u_color_correction_texture.append_id(default_sampler);
+		u_color_correction_texture.append_id(p_settings.color_correction_texture);
+		uniforms.push_back(u_color_correction_texture);
+	}
 
 	RID shader = tonemap.shader.version_get_shader(tonemap.shader_version, mode);
 	ERR_FAIL_COND(shader.is_null());
