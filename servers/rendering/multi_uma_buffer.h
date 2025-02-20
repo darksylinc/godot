@@ -154,8 +154,7 @@ public:
 		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
 		const uint64_t frames_drawn = rd->get_frames_drawn();
 
-		if (last_frame_mapped == frames_drawn || curr_idx >= buffers.size()) {
-			push();
+		if (last_frame_mapped == frames_drawn) {
 			++curr_idx;
 		} else {
 			curr_idx = 0u;
@@ -164,6 +163,9 @@ public:
 			}
 		}
 		last_frame_mapped = frames_drawn;
+		if (curr_idx * NUM_BUFFERS >= buffers.size()) {
+			push();
+		}
 
 #ifdef DEV_ENABLED
 		for (size_t i = 0u; i < NUM_BUFFERS; ++i) {
