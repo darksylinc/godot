@@ -35,7 +35,6 @@
 #include "core/templates/paged_array.h"
 #include "core/templates/rid_owner.h"
 #include "core/templates/self_list.h"
-#include "servers/rendering/multi_uma_buffer.h"
 #include "servers/rendering/renderer_rd/cluster_builder_rd.h"
 #include "servers/rendering/renderer_rd/environment/sky.h"
 #include "servers/rendering/renderer_rd/storage_rd/forward_id_storage.h"
@@ -180,13 +179,8 @@ private:
 	LightData *spot_lights = nullptr;
 	LightInstanceDepthSort *omni_light_sort = nullptr;
 	LightInstanceDepthSort *spot_light_sort = nullptr;
-
-	enum LightBuffers {
-		LB_DIRECTIONAL,
-		LB_OMNI,
-		LB_SPOT
-	};
-	MultiUmaBuffer<3u> light_buffers = MultiUmaBuffer<3u>("LightStorage::light_buffers");
+	RID omni_light_buffer;
+	RID spot_light_buffer;
 
 	/* DIRECTIONAL LIGHT DATA */
 
@@ -221,6 +215,7 @@ private:
 
 	uint32_t max_directional_lights;
 	DirectionalLightData *directional_lights = nullptr;
+	RID directional_light_buffer;
 
 	/* REFLECTION PROBE */
 
@@ -809,10 +804,9 @@ public:
 
 	void free_light_data();
 	void set_max_lights(const uint32_t p_max_lights);
-	uint32_t get_curr_light_buffer_idx() { return light_buffers.get_curr_idx(); }
-	RID get_omni_light_buffer() { return light_buffers._get(LB_OMNI); }
-	RID get_spot_light_buffer() { return light_buffers._get(LB_SPOT); }
-	RID get_directional_light_buffer() { return light_buffers._get(LB_DIRECTIONAL); }
+	RID get_omni_light_buffer() { return omni_light_buffer; }
+	RID get_spot_light_buffer() { return spot_light_buffer; }
+	RID get_directional_light_buffer() { return directional_light_buffer; }
 	uint32_t get_max_directional_lights() { return max_directional_lights; }
 	uint32_t get_directional_light_blend_splits(uint32_t p_directional_light_count) const {
 		uint32_t blend_splits = 0;

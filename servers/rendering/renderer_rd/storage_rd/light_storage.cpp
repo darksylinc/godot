@@ -538,7 +538,20 @@ void LightStorage::light_instance_mark_visible(RID p_light_instance) {
 /* LIGHT DATA */
 
 void LightStorage::free_light_data() {
-	light_buffers.uninit();
+	if (directional_light_buffer.is_valid()) {
+		RD::get_singleton()->free(directional_light_buffer);
+		directional_light_buffer = RID();
+	}
+
+	if (omni_light_buffer.is_valid()) {
+		RD::get_singleton()->free(omni_light_buffer);
+		omni_light_buffer = RID();
+	}
+
+	if (spot_light_buffer.is_valid()) {
+		RD::get_singleton()->free(spot_light_buffer);
+		spot_light_buffer = RID();
+	}
 
 	if (directional_lights != nullptr) {
 		memdelete_arr(directional_lights);
@@ -571,17 +584,17 @@ void LightStorage::set_max_lights(const uint32_t p_max_lights) {
 
 	uint32_t light_buffer_size = max_lights * sizeof(LightData);
 	omni_lights = memnew_arr(LightData, max_lights);
-	light_buffers.set_size(LB_OMNI, light_buffer_size, true);
+	omni_light_buffer = RD::get_singleton()->storage_buffer_create(light_buffer_size);
 	omni_light_sort = memnew_arr(LightInstanceDepthSort, max_lights);
 	spot_lights = memnew_arr(LightData, max_lights);
-	light_buffers.set_size(LB_SPOT, light_buffer_size, true);
+	spot_light_buffer = RD::get_singleton()->storage_buffer_create(light_buffer_size);
 	spot_light_sort = memnew_arr(LightInstanceDepthSort, max_lights);
 	//defines += "\n#define MAX_LIGHT_DATA_STRUCTS " + itos(max_lights) + "\n";
 
 	max_directional_lights = RendererSceneRender::MAX_DIRECTIONAL_LIGHTS;
 	uint32_t directional_light_buffer_size = max_directional_lights * sizeof(DirectionalLightData);
 	directional_lights = memnew_arr(DirectionalLightData, max_directional_lights);
-	light_buffers.set_size(LB_DIRECTIONAL, directional_light_buffer_size, false);
+	directional_light_buffer = RD::get_singleton()->uniform_buffer_create(directional_light_buffer_size);
 }
 
 void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const PagedArray<RID> &p_lights, const Transform3D &p_camera_transform, RID p_shadow_atlas, bool p_using_shadows, uint32_t &r_directional_light_count, uint32_t &r_positional_light_count, bool &r_directional_light_soft_shadows) {
@@ -1016,18 +1029,16 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 	}
 
 	//update without barriers
-	light_buffers.prepare_for_upload();
-
 	if (omni_light_count) {
-		light_buffers.upload(LB_OMNI, omni_lights, sizeof(LightData) * omni_light_count);
+		RD::get_singleton()->buffer_update(omni_light_buffer, 0, sizeof(LightData) * omni_light_count, omni_lights);
 	}
 
 	if (spot_light_count) {
-		light_buffers.upload(LB_SPOT, spot_lights, sizeof(LightData) * spot_light_count);
+		RD::get_singleton()->buffer_update(spot_light_buffer, 0, sizeof(LightData) * spot_light_count, spot_lights);
 	}
 
 	if (r_directional_light_count) {
-		light_buffers.upload(LB_DIRECTIONAL, directional_lights, sizeof(DirectionalLightData) * r_directional_light_count);
+		RD::get_singleton()->buffer_update(directional_light_buffer, 0, sizeof(DirectionalLightData) * r_directional_light_count, directional_lights);
 	}
 }
 

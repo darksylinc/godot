@@ -1687,14 +1687,10 @@ void RenderForwardMobile::_update_render_base_uniform_set() {
 
 	// We must always recreate the uniform set every frame if we're using linear pools (since we requested it on creation).
 	// This pays off as long as we often get inside the if() block (i.e. the settings end up changing often).
-	/*if (RD::get_singleton()->uniform_sets_have_linear_pools() || render_base_uniform_set.is_null() || !RD::get_singleton()->uniform_set_is_valid(render_base_uniform_set) || (lightmap_texture_array_version != light_storage->lightmap_array_get_version()))*/ {
+	if (RD::get_singleton()->uniform_sets_have_linear_pools() || render_base_uniform_set.is_null() || !RD::get_singleton()->uniform_set_is_valid(render_base_uniform_set) || (lightmap_texture_array_version != light_storage->lightmap_array_get_version())) {
 		if (render_base_uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(render_base_uniform_set)) {
 			RD::get_singleton()->free(render_base_uniform_set);
 		}
-
-#ifdef DEV_ENABLED
-		debug_light_buffer_idx = RendererRD::LightStorage::get_singleton()->get_curr_light_buffer_idx();
-#endif
 
 		lightmap_texture_array_version = light_storage->lightmap_array_get_version();
 
@@ -1712,14 +1708,14 @@ void RenderForwardMobile::_update_render_base_uniform_set() {
 		{
 			RD::Uniform u;
 			u.binding = 3;
-			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC;
+			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
 			u.append_id(RendererRD::LightStorage::get_singleton()->get_omni_light_buffer());
 			uniforms.push_back(u);
 		}
 		{
 			RD::Uniform u;
 			u.binding = 4;
-			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC;
+			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
 			u.append_id(RendererRD::LightStorage::get_singleton()->get_spot_light_buffer());
 			uniforms.push_back(u);
 		}
@@ -1734,7 +1730,7 @@ void RenderForwardMobile::_update_render_base_uniform_set() {
 		{
 			RD::Uniform u;
 			u.binding = 6;
-			u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC;
+			u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
 			u.append_id(RendererRD::LightStorage::get_singleton()->get_directional_light_buffer());
 			uniforms.push_back(u);
 		}
@@ -2146,11 +2142,6 @@ void RenderForwardMobile::_render_list_template(RenderingDevice::DrawListID p_dr
 
 	RD::DrawListID draw_list = p_draw_list;
 	RD::FramebufferFormatID framebuffer_format = p_framebuffer_Format;
-
-	// If this assert triggers, then render_base_uniform_set was built using MultiUmaBuffer::get but later
-	// MultiUmaBuffer::prepare_for_upload was called. That invalidates the render_base_uniform_set.
-	// MultiUmaBuffer::prepare_for_upload must be called before MultiUmaBuffer::get, not after.
-	DEV_ASSERT(debug_light_buffer_idx == RendererRD::LightStorage::get_singleton()->get_curr_light_buffer_idx());
 
 	//global scope bindings
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, render_base_uniform_set, SCENE_UNIFORM_SET);

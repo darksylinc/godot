@@ -32,6 +32,7 @@
 #define RENDER_FORWARD_MOBILE_H
 
 #include "core/templates/paged_allocator.h"
+#include "servers/rendering/multi_uma_buffer.h"
 #include "servers/rendering/renderer_rd/forward_mobile/scene_shader_forward_mobile.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 
@@ -173,9 +174,6 @@ private:
 	void _setup_environment(const RenderDataRD *p_render_data, bool p_no_fog, const Size2i &p_screen_size, const Color &p_default_bg_color, bool p_opaque_render_buffers = false, bool p_pancake_shadows = false);
 	void _setup_lightmaps(const RenderDataRD *p_render_data, const PagedArray<RID> &p_lightmaps, const Transform3D &p_cam_transform);
 
-#ifdef DEV_ENABLED
-	uint32_t debug_light_buffer_idx = UINT32_MAX;
-#endif
 	RID render_base_uniform_set;
 	LocalVector<RID> render_pass_uniform_sets;
 
