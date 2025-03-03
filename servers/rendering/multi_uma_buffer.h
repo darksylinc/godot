@@ -141,7 +141,7 @@ public:
 		curr_idx = UINT32_MAX;
 	}
 
-	uint32_t get_size(uint32_t idx) const { return buffer_sizes[idx]; }
+	uint32_t get_size(uint32_t idx) const { return buffer_sizes[idx] & ~0x80000000u; }
 
 	// Gets the raw buffer. Use with care.
 	// If you call this function, make sure to have called prepare_for_upload() first.
