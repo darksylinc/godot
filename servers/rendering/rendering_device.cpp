@@ -807,6 +807,22 @@ uint64_t RenderingDevice::buffer_get_device_address(RID p_buffer) {
 	return driver->buffer_get_device_address(buffer->driver_id);
 }
 
+uint8_t *RenderingDevice::buffer_persistent_map_advance(RID p_buffer) {
+	ERR_RENDER_THREAD_GUARD_V(0);
+
+	Buffer *buffer = _get_buffer_from_owner(p_buffer);
+	ERR_FAIL_NULL_V_MSG(buffer, nullptr, "Buffer argument is not a valid buffer of any type.");
+	return driver->buffer_persistent_map_advance(buffer->driver_id, frames_drawn);
+}
+
+void RenderingDevice::buffer_flush(RID p_buffer) {
+	ERR_RENDER_THREAD_GUARD();
+
+	Buffer *buffer = _get_buffer_from_owner(p_buffer);
+	ERR_FAIL_NULL_MSG(buffer, "Buffer argument is not a valid buffer of any type.");
+	driver->buffer_flush(buffer->driver_id);
+}
+
 RID RenderingDevice::storage_buffer_create(uint32_t p_size_bytes, const Vector<uint8_t> &p_data, BitField<StorageBufferUsage> p_usage, BitField<BufferCreationBits> p_creation_bits) {
 	ERR_FAIL_COND_V(p_data.size() && (uint32_t)p_data.size() != p_size_bytes, RID());
 

@@ -167,7 +167,7 @@ private:
 
 	void _update_render_base_uniform_set();
 
-	void _update_instance_data_buffer(RenderListType p_render_list);
+	// void _update_instance_data_buffer(RenderListType p_render_list);
 	void _fill_instance_data(RenderListType p_render_list, uint32_t p_offset = 0, int32_t p_max_elements = -1, bool p_update_buffer = true);
 	void _fill_render_list(RenderListType p_render_list, const RenderDataRD *p_render_data, PassMode p_pass_mode, bool p_append = false);
 
@@ -224,7 +224,7 @@ private:
 		};
 
 		MultiUmaBuffer<1u> instance_buffer[RENDER_LIST_MAX] = { MultiUmaBuffer<1u>("RENDER_LIST_OPAQUE"), MultiUmaBuffer<1u>("RENDER_LIST_ALPHA"), MultiUmaBuffer<1u>("RENDER_LIST_SECONDARY") };
-		LocalVector<InstanceData> instance_data[RENDER_LIST_MAX];
+		InstanceData *curr_gpu_ptr[RENDER_LIST_MAX] = {};
 
 		// !BAS! We need to change lightmaps, we're not going to do this with a buffer but pushing the used lightmap in
 		LightmapData lightmaps[MAX_LIGHTMAPS];
@@ -260,6 +260,8 @@ private:
 		};
 
 		LocalVector<ShadowPass> shadow_passes;
+
+		void grow_instance_buffer(RenderListType p_render_list, uint32_t p_req_element_count, bool p_append);
 	} scene_state;
 
 	/* Render List */

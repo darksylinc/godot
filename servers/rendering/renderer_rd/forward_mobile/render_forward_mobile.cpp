@@ -1803,7 +1803,7 @@ RID RenderForwardMobile::_render_buffers_get_velocity_texture(Ref<RenderSceneBuf
 	return RID();
 }
 
-void RenderForwardMobile::_update_instance_data_buffer(RenderListType p_render_list) {
+/*void RenderForwardMobile::_update_instance_data_buffer(RenderListType p_render_list) {
 	if (scene_state.instance_data[p_render_list].size() > 0) {
 		if (scene_state.instance_buffer[p_render_list].get_size(0u) < scene_state.instance_data[p_render_list].size() * sizeof(SceneState::InstanceData)) {
 			scene_state.instance_buffer[p_render_list].uninit();
@@ -1814,20 +1814,43 @@ void RenderForwardMobile::_update_instance_data_buffer(RenderListType p_render_l
 		scene_state.instance_buffer[p_render_list].prepare_for_upload();
 		scene_state.instance_buffer[p_render_list].upload(0u, scene_state.instance_data[p_render_list].ptr(), sizeof(SceneState::InstanceData) * scene_state.instance_data[p_render_list].size());
 	}
+}*/
+
+void RenderForwardMobile::SceneState::grow_instance_buffer(RenderListType p_render_list, uint32_t p_req_element_count, bool p_append) {
+	if (p_req_element_count > 0) {
+		if (instance_buffer[p_render_list].get_size(0u) < p_req_element_count * sizeof(SceneState::InstanceData)) {
+			instance_buffer[p_render_list].uninit();
+			uint32_t new_size = nearest_power_of_2_templated(MAX(uint64_t(INSTANCE_DATA_BUFFER_MIN_SIZE), p_req_element_count));
+			instance_buffer[p_render_list].set_size(0u, new_size * sizeof(SceneState::InstanceData), true);
+			curr_gpu_ptr[p_render_list] = nullptr;
+		}
+
+		const bool must_remap = instance_buffer[p_render_list].prepare_for_map(p_append);
+		if (must_remap) {
+			curr_gpu_ptr[p_render_list] = nullptr;
+		}
+	}
 }
 
 void RenderForwardMobile::_fill_instance_data(RenderListType p_render_list, uint32_t p_offset, int32_t p_max_elements, bool p_update_buffer) {
 	RenderList *rl = &render_list[p_render_list];
 	uint32_t element_total = p_max_elements >= 0 ? uint32_t(p_max_elements) : rl->elements.size();
 
-	scene_state.instance_data[p_render_list].resize(p_offset + element_total);
 	rl->element_info.resize(p_offset + element_total);
+
+	scene_state.grow_instance_buffer(p_render_list, p_offset + element_total, p_offset != 0u);
+	if (!scene_state.curr_gpu_ptr[p_render_list] && element_total > 0u) {
+		// The old buffer was replaced for another larger one. We must start copying from scratch.
+		element_total += p_offset;
+		p_offset = 0u;
+		scene_state.curr_gpu_ptr[p_render_list] = reinterpret_cast<SceneState::InstanceData *>(scene_state.instance_buffer[p_render_list].map_raw_for_upload(0u));
+	}
 
 	for (uint32_t i = 0; i < element_total; i++) {
 		GeometryInstanceSurfaceDataCache *surface = rl->elements[i + p_offset];
 		GeometryInstanceForwardMobile *inst = surface->owner;
 
-		SceneState::InstanceData &instance_data = scene_state.instance_data[p_render_list][i + p_offset];
+		SceneState::InstanceData instance_data;
 
 		if (inst->store_transform_cache) {
 			RendererRD::MaterialStorage::store_transform(inst->transform, instance_data.transform);
@@ -1876,14 +1899,17 @@ void RenderForwardMobile::_fill_instance_data(RenderListType p_render_list, uint
 		instance_data.uv_scale[2] = uv_scale.z;
 		instance_data.uv_scale[3] = uv_scale.w;
 
+		scene_state.curr_gpu_ptr[p_render_list][i + p_offset] = instance_data;
+
 		RenderElementInfo &element_info = rl->element_info[p_offset + i];
 
 		element_info.lod_index = surface->lod_index;
 		element_info.uses_lightmap = surface->sort.uses_lightmap;
 	}
 
-	if (p_update_buffer) {
-		_update_instance_data_buffer(p_render_list);
+	if (p_update_buffer && element_total > 0u) {
+		// _update_instance_data_buffer(p_render_list);
+		RenderingDevice::get_singleton()->buffer_flush(scene_state.instance_buffer[p_render_list]._get(0u));
 	}
 }
 

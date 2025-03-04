@@ -151,6 +151,14 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 #endif
 	DeviceFunctions device_functions;
 
+	struct PendingFlushes {
+		LocalVector<VmaAllocation> allocations;
+		LocalVector<VkDeviceSize> offsets;
+		LocalVector<VkDeviceSize> sizes;
+	};
+
+	PendingFlushes pending_flushes;
+
 	void _register_requested_device_extension(const CharString &p_extension_name, bool p_required);
 	Error _initialize_device_extensions();
 	Error _check_device_features();
@@ -219,6 +227,7 @@ public:
 	virtual uint8_t *buffer_map(BufferID p_buffer) override final;
 	virtual void buffer_unmap(BufferID p_buffer) override final;
 	virtual uint8_t *buffer_persistent_map_advance(BufferID p_buffer, uint64_t p_frames_drawn) override final;
+	void buffer_flush(BufferID p_buffer) override final;
 	virtual uint64_t buffer_get_device_address(BufferID p_buffer) override final;
 
 	/*****************/

@@ -150,13 +150,20 @@ public:
 		return buffers[curr_idx * NUM_BUFFERS + idx];
 	}
 
-	void prepare_for_upload() {
+	/**
+	 * @param p_append	True if you wish to append more data to existing buffer.
+	 * @return			True if it's possible to append. False if the internal buffer changed.
+	 */
+	bool prepare_for_map(bool p_append) {
 		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
 		const uint64_t frames_drawn = rd->get_frames_drawn();
 
 		if (last_frame_mapped == frames_drawn) {
-			++curr_idx;
+			if (!p_append) {
+				++curr_idx;
+			}
 		} else {
+			p_append = false;
 			curr_idx = 0u;
 			if (max_extra_buffers != UINT32_MAX) {
 				shrink_to_max_extra_buffers();
@@ -168,10 +175,26 @@ public:
 		}
 
 #ifdef DEV_ENABLED
-		for (size_t i = 0u; i < NUM_BUFFERS; ++i) {
-			can_upload[i] = true;
+		if (!p_append) {
+			for (size_t i = 0u; i < NUM_BUFFERS; ++i) {
+				can_upload[i] = true;
+			}
 		}
 #endif
+		return !p_append;
+	}
+
+	void prepare_for_upload() {
+		prepare_for_map(false);
+	}
+
+	void *map_raw_for_upload(uint32_t idx) {
+#ifdef DEV_ENABLED
+		DEV_ASSERT(can_upload[idx] && "Forgot to prepare_for_upload first! Or called get_for_upload/upload() twice.");
+		can_upload[idx] = false;
+#endif
+		RenderingDevice *rd = RD::RenderingDevice::get_singleton();
+		return rd->buffer_persistent_map_advance(buffers[curr_idx * NUM_BUFFERS + idx]);
 	}
 
 	RID get_for_upload(uint32_t idx) {

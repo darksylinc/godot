@@ -1665,6 +1665,25 @@ uint8_t *RenderingDeviceDriverVulkan::buffer_persistent_map_advance(BufferID p_b
 	return buf_info->persistent_ptr + buf_info->frame_idx * buf_info->size;
 }
 
+void RenderingDeviceDriverVulkan::buffer_flush(BufferID p_buffer) {
+	BufferDynamicInfo *buf_info = (BufferDynamicInfo *)p_buffer.id;
+
+	VkMemoryPropertyFlags memPropFlags;
+	vmaGetAllocationMemoryProperties(allocator, buf_info->allocation.handle, &memPropFlags);
+
+	if (memPropFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
+		if (buf_info->is_dynamic()) {
+			pending_flushes.allocations.push_back(buf_info->allocation.handle);
+			pending_flushes.offsets.push_back(buf_info->frame_idx * buf_info->size);
+			pending_flushes.sizes.push_back(buf_info->size);
+		} else {
+			pending_flushes.allocations.push_back(buf_info->allocation.handle);
+			pending_flushes.offsets.push_back(0u);
+			pending_flushes.sizes.push_back(VK_WHOLE_SIZE);
+		}
+	}
+}
+
 uint64_t RenderingDeviceDriverVulkan::buffer_get_device_address(BufferID p_buffer) {
 	const BufferInfo *buf_info = (const BufferInfo *)p_buffer.id;
 	VkBufferDeviceAddressInfo address_info = {};
@@ -2587,6 +2606,15 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 		// FIXME: Allow specifying the stage mask in more detail.
 		wait_semaphores.push_back(VkSemaphore(p_wait_semaphores[i].id));
 		wait_semaphores_stages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+	}
+
+	if (!pending_flushes.allocations.is_empty()) {
+		// We must do this now, even if p_cmd_buffers is empty; because afterwards pending_flushes.allocations
+		// could become dangling. We cannot delay this call for the next frame(s).
+		err = vmaFlushAllocations(allocator, pending_flushes.allocations.size(),
+				pending_flushes.allocations.ptr(), pending_flushes.offsets.ptr(),
+				pending_flushes.sizes.ptr());
+		ERR_FAIL_COND_V(err != VK_SUCCESS, FAILED);
 	}
 
 	if (p_cmd_buffers.size() > 0) {
