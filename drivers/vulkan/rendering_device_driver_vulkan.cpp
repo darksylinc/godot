@@ -1671,7 +1671,9 @@ void RenderingDeviceDriverVulkan::buffer_flush(BufferID p_buffer) {
 	VkMemoryPropertyFlags memPropFlags;
 	vmaGetAllocationMemoryProperties(allocator, buf_info->allocation.handle, &memPropFlags);
 
-	if (memPropFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
+	const bool needs_flushing = !(memPropFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+	if (needs_flushing) {
 		if (buf_info->is_dynamic()) {
 			pending_flushes.allocations.push_back(buf_info->allocation.handle);
 			pending_flushes.offsets.push_back(buf_info->frame_idx * buf_info->size);
@@ -2614,6 +2616,9 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 		err = vmaFlushAllocations(allocator, pending_flushes.allocations.size(),
 				pending_flushes.allocations.ptr(), pending_flushes.offsets.ptr(),
 				pending_flushes.sizes.ptr());
+		pending_flushes.allocations.clear();
+		pending_flushes.offsets.clear();
+		pending_flushes.sizes.clear();
 		ERR_FAIL_COND_V(err != VK_SUCCESS, FAILED);
 	}
 
