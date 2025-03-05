@@ -418,7 +418,7 @@ RID RenderForwardMobile::_setup_render_pass_uniform_set(RenderListType p_render_
 		if (scene_state.instance_buffer[p_render_list].get_size(0u) == 0u) {
 			// Any buffer will do since its not used, so just create one.
 			// We can't use scene_shader.default_vec4_xform_buffer because't it's not dynamic.
-			scene_state.instance_buffer[p_render_list].set_size(0u, 256u, true);
+			scene_state.instance_buffer[p_render_list].set_size(0u, INSTANCE_DATA_BUFFER_MIN_SIZE * sizeof(SceneState::InstanceData), true);
 			scene_state.instance_buffer[p_render_list].prepare_for_upload();
 		}
 		RID instance_buffer = scene_state.instance_buffer[p_render_list]._get(0u);
@@ -1803,19 +1803,6 @@ RID RenderForwardMobile::_render_buffers_get_velocity_texture(Ref<RenderSceneBuf
 	return RID();
 }
 
-/*void RenderForwardMobile::_update_instance_data_buffer(RenderListType p_render_list) {
-	if (scene_state.instance_data[p_render_list].size() > 0) {
-		if (scene_state.instance_buffer[p_render_list].get_size(0u) < scene_state.instance_data[p_render_list].size() * sizeof(SceneState::InstanceData)) {
-			scene_state.instance_buffer[p_render_list].uninit();
-			uint32_t new_size = nearest_power_of_2_templated(MAX(uint64_t(INSTANCE_DATA_BUFFER_MIN_SIZE), scene_state.instance_data[p_render_list].size()));
-			scene_state.instance_buffer[p_render_list].set_size(0u, new_size * sizeof(SceneState::InstanceData), true);
-		}
-
-		scene_state.instance_buffer[p_render_list].prepare_for_upload();
-		scene_state.instance_buffer[p_render_list].upload(0u, scene_state.instance_data[p_render_list].ptr(), sizeof(SceneState::InstanceData) * scene_state.instance_data[p_render_list].size());
-	}
-}*/
-
 void RenderForwardMobile::SceneState::grow_instance_buffer(RenderListType p_render_list, uint32_t p_req_element_count, bool p_append) {
 	if (p_req_element_count > 0) {
 		if (instance_buffer[p_render_list].get_size(0u) < p_req_element_count * sizeof(SceneState::InstanceData)) {
@@ -1908,7 +1895,6 @@ void RenderForwardMobile::_fill_instance_data(RenderListType p_render_list, uint
 	}
 
 	if (p_update_buffer && element_total > 0u) {
-		// _update_instance_data_buffer(p_render_list);
 		RenderingDevice::get_singleton()->buffer_flush(scene_state.instance_buffer[p_render_list]._get(0u));
 	}
 }
