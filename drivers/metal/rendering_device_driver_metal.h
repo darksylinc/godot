@@ -47,6 +47,7 @@ class RenderingContextDriverMetal;
 
 class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) RenderingDeviceDriverMetal : public RenderingDeviceDriver {
 	friend struct ShaderCacheEntry;
+	friend class MDCommandBuffer;
 
 	template <typename T>
 	using Result = std::variant<T, Error>;

@@ -125,16 +125,16 @@ RDD::BufferID RenderingDeviceDriverMetal::buffer_create(uint64_t p_size, BitFiel
 		p_size = round_up_to_alignment(p_size, 16u) * frame_count;
 	}
 
-	MTLResourceOptions options = MTLResourceHazardTrackingModeTracked;
+	MTLResourceOptions options = 0;
 	switch (p_allocation_type) {
 		case MEMORY_ALLOCATION_TYPE_CPU:
-			options |= MTLResourceStorageModeShared;
+			options = MTLResourceHazardTrackingModeTracked | MTLResourceStorageModeShared;
 			break;
 		case MEMORY_ALLOCATION_TYPE_GPU:
 			if (p_usage.has_flag(BUFFER_USAGE_DYNAMIC_PERSISTENT_BIT)) {
-				options |= MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined;
+				options = MTLResourceHazardTrackingModeUntracked | MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined;
 			} else {
-				options |= MTLResourceStorageModePrivate;
+				options = MTLResourceHazardTrackingModeTracked | MTLResourceStorageModePrivate;
 			}
 			break;
 	}
@@ -2496,6 +2496,8 @@ RDD::ShaderID RenderingDeviceDriverMetal::shader_create_from_bytecode(const Vect
 			ERR_FAIL_V_MSG(ShaderID(), "Unexpected end of buffer");
 	}
 
+	r_name = String(binary_data.shader_name.get_data());
+
 	// We need to regenerate the shader if the cache is moved to an incompatible device.
 	ERR_FAIL_COND_V_MSG(device_properties->features.argument_buffers_tier < MTLArgumentBuffersTier2 && binary_data.uses_argument_buffers(),
 			ShaderID(),
@@ -2564,12 +2566,14 @@ RDD::ShaderID RenderingDeviceDriverMetal::shader_create_from_bytecode(const Vect
 					case UNIFORM_TYPE_UNIFORM_BUFFER: {
 						const uint64_t key = DynamicBuffer::encode(uniform_set.index, su.binding);
 						if (p_dynamic_buffers.find(key) >= 0) {
+							set.dynamic_uniforms.push_back(i);
 							su.type = UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC;
 						}
 					} break;
 					case UNIFORM_TYPE_STORAGE_BUFFER: {
 						const uint64_t key = DynamicBuffer::encode(uniform_set.index, su.binding);
 						if (p_dynamic_buffers.find(key) >= 0) {
+							set.dynamic_uniforms.push_back(i);
 							su.type = UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC;
 						}
 					} break;
