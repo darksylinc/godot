@@ -119,6 +119,7 @@ void MetalDeviceProperties::init_features(id<MTLDevice> p_device) {
 	features.simdPermute = [p_device supportsFamily:MTLGPUFamilyApple6];
 	features.simdReduction = [p_device supportsFamily:MTLGPUFamilyApple7];
 	features.argument_buffers_tier = p_device.argumentBuffersSupport;
+	features.max_buffers_tier = features.argument_buffers_tier;
 
 	if (@available(macOS 13.0, iOS 16.0, tvOS 16.0, *)) {
 		features.needs_arg_encoders = !([p_device supportsFamily:MTLGPUFamilyMetal3] && features.argument_buffers_tier == MTLArgumentBuffersTier2);
@@ -334,9 +335,31 @@ void MetalDeviceProperties::init_limits(id<MTLDevice> p_device) {
 	}
 }
 
+void MetalDeviceProperties::init_user_overrides(id<MTLDevice> p_device) {
+	if (OS::get_singleton()->has_environment(U"GODOT_MTL_ARGUMENT_BUFFERS_TIER")) {
+		uint64_t tier = OS::get_singleton()->get_environment(U"GODOT_MTL_ARGUMENT_BUFFERS_TIER").to_int();
+		switch (tier) {
+			case 1:
+				features.max_buffers_tier = MTLArgumentBuffersTier1;
+				break;
+			case 2:
+				if (features.argument_buffers_tier >= MTLArgumentBuffersTier2) {
+					features.max_buffers_tier = MTLArgumentBuffersTier2;
+				} else {
+					WARN_PRINT("Current device does not support tier 2 argument buffers, leaving as default.");
+				}
+				break;
+			default:
+				WARN_PRINT(vformat("Invalid value for GODOT_MTL_ARGUMENT_BUFFER_TIER: %d. Falling back to device default.", tier));
+				break;
+		}
+	}
+}
+
 MetalDeviceProperties::MetalDeviceProperties(id<MTLDevice> p_device) {
 	init_features(p_device);
 	init_limits(p_device);
+	init_user_overrides(p_device);
 }
 
 MetalDeviceProperties::~MetalDeviceProperties() {

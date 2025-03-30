@@ -87,7 +87,12 @@ struct API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) MetalFeatures {
 	bool simdReduction = false; /**< If true, SIMD-group reduction functions (arithmetic) are supported in shaders. */
 	bool tessellationShader = false; /**< If true, tessellation shaders are supported. */
 	bool imageCubeArray = false; /**< If true, image cube arrays are supported. */
+	/// The maximum argument buffers tier supported by the Metal device.
 	MTLArgumentBuffersTier argument_buffers_tier = MTLArgumentBuffersTier1;
+	/// This is the maximum allowed argument buffers tier used generating shaders.
+	///
+	/// It is either set from the device's maximum supported tier or via a user override.
+	MTLArgumentBuffersTier max_buffers_tier = MTLArgumentBuffersTier1;
 	/// If true, argument encoders are required to encode arguments into an argument buffer.
 	bool needs_arg_encoders = true;
 	bool metal_fx_spatial = false; /**< If true, Metal FX spatial functions are supported. */
@@ -139,6 +144,7 @@ class API_AVAILABLE(macos(11.0), ios(14.0), tvos(14.0)) MetalDeviceProperties {
 private:
 	void init_features(id<MTLDevice> p_device);
 	void init_limits(id<MTLDevice> p_device);
+	void init_user_overrides(id<MTLDevice> p_device);
 
 public:
 	MetalFeatures features;
