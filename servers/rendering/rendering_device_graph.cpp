@@ -1726,7 +1726,7 @@ void RenderingDeviceGraph::add_compute_list_bind_uniform_sets(RDD::ShaderID p_sh
 	instruction->shader = p_shader;
 	instruction->first_set_index = p_first_set_index;
 	instruction->set_count = p_set_count;
-	instruction->dynamic_offsets_mask = driver->uniform_sets_get_dynamic_offsets(p_uniform_sets, p_set_count);
+	instruction->dynamic_offsets_mask = driver->uniform_sets_get_dynamic_offsets(p_uniform_sets, p_shader, p_first_set_index, p_set_count);
 
 	RDD::UniformSetID *ids = instruction->uniform_set_ids();
 	for (uint32_t i = 0; i < p_set_count; i++) {
@@ -1845,7 +1845,7 @@ void RenderingDeviceGraph::add_draw_list_bind_uniform_sets(RDD::ShaderID p_shade
 	instruction->shader = p_shader;
 	instruction->first_set_index = p_first_index;
 	instruction->set_count = p_set_count;
-	instruction->dynamic_offsets_mask = driver->uniform_sets_get_dynamic_offsets(p_uniform_sets, p_set_count);
+	instruction->dynamic_offsets_mask = driver->uniform_sets_get_dynamic_offsets(p_uniform_sets, p_shader, p_first_index, p_set_count);
 
 	for (uint32_t i = 0; i < p_set_count; i++) {
 		instruction->uniform_set_ids()[i] = p_uniform_sets[i];

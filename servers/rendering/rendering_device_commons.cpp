@@ -1057,6 +1057,7 @@ Error RenderingDeviceCommons::reflect_spirv(VectorView<ShaderStageSPIRVData> p_s
 							const uint64_t key = ShaderRD::DynamicBuffer::encode(binding.set, binding.binding);
 							if (dynamic_buffers.find(key) >= 0) {
 								uniform.type = UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC;
+								r_reflection.has_dynamic_buffers = true;
 							} else {
 								uniform.type = UNIFORM_TYPE_UNIFORM_BUFFER;
 							}
@@ -1066,6 +1067,7 @@ Error RenderingDeviceCommons::reflect_spirv(VectorView<ShaderStageSPIRVData> p_s
 							const uint64_t key = ShaderRD::DynamicBuffer::encode(binding.set, binding.binding);
 							if (dynamic_buffers.find(key) >= 0) {
 								uniform.type = UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC;
+								r_reflection.has_dynamic_buffers = true;
 							} else {
 								uniform.type = UNIFORM_TYPE_STORAGE_BUFFER;
 							}

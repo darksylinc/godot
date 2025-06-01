@@ -501,7 +501,7 @@ public:
 	virtual void linear_uniform_set_pools_reset(int p_linear_pool_index) override final;
 	virtual void uniform_set_free(UniformSetID p_uniform_set) override final;
 	virtual bool uniform_sets_have_linear_pools() const override final;
-	virtual uint32_t uniform_sets_get_dynamic_offsets(VectorView<UniformSetID> p_uniform_sets, uint32_t p_set_count) const override final;
+	virtual uint32_t uniform_sets_get_dynamic_offsets(VectorView<UniformSetID> p_uniform_sets, ShaderID p_shader, uint32_t p_first_set_index, uint32_t p_set_count) const override final;
 
 	// ----- COMMANDS -----
 

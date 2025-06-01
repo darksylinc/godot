@@ -503,13 +503,17 @@ public:
 		// Flag to indicate  that this is an immutable sampler so it is skipped when creating uniform
 		// sets, as it would be set previously when creating the pipeline layout.
 		bool immutable_sampler = false;
+
+		_FORCE_INLINE_ bool is_dynamic() const {
+			return type == UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC || type == UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC;
+		}
 	};
 
 	virtual UniformSetID uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index, int p_linear_pool_index) = 0;
 	virtual void linear_uniform_set_pools_reset(int p_linear_pool_index) {}
 	virtual void uniform_set_free(UniformSetID p_uniform_set) = 0;
 	virtual bool uniform_sets_have_linear_pools() const { return false; }
-	virtual uint32_t uniform_sets_get_dynamic_offsets(VectorView<UniformSetID> p_uniform_sets, uint32_t p_set_count) const = 0;
+	virtual uint32_t uniform_sets_get_dynamic_offsets(VectorView<UniformSetID> p_uniform_sets, ShaderID p_shader, uint32_t p_first_set_index, uint32_t p_set_count) const = 0;
 
 	// ----- COMMANDS -----
 

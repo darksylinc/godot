@@ -63,9 +63,6 @@
 #import <Metal/Metal.h>
 #import <os/log.h>
 #import <os/signpost.h>
-#import <spirv.hpp>
-#import <spirv_msl.hpp>
-#import <spirv_parser.hpp>
 
 #pragma mark - Logging
 
@@ -77,8 +74,6 @@ __attribute__((constructor)) static void InitializeLogging(void) {
 	LOG_DRIVER = os_log_create("org.godotengine.godot.metal", OS_LOG_CATEGORY_POINTS_OF_INTEREST);
 	LOG_INTERVALS = os_log_create("org.godotengine.godot.metal", "events");
 }
-
-static const uint32_t MAX_DYNAMIC_BUFFERS = 8u; // Minimum guaranteed by Vulkan.
 
 /*****************/
 /**** GENERIC ****/
@@ -152,7 +147,7 @@ RDD::BufferID RenderingDeviceDriverMetal::buffer_create(uint64_t p_size, BitFiel
 #ifdef DEBUG_ENABLED
 		dyn_buffer->last_frame_mapped = p_frames_drawn - 1ul;
 #endif
-		dyn_buffer->frame_idx = 0u;
+		dyn_buffer->set_frame_index(0u);
 		dyn_buffer->size_bytes = round_up_to_alignment(original_size, 16u);
 	} else {
 		buf_info = memnew(BufferInfo);
@@ -200,8 +195,7 @@ uint8_t *RenderingDeviceDriverMetal::buffer_persistent_map_advance(BufferID p_bu
 	ERR_FAIL_COND_V_MSG(buf_info->last_frame_mapped == p_frames_drawn, nullptr, "Buffers with BUFFER_USAGE_DYNAMIC_PERSISTENT_BIT must only be mapped once per frame. Otherwise there could be race conditions with the GPU. Amalgamate all data uploading into one map(), use an extra buffer or remove the bit.");
 	buf_info->last_frame_mapped = p_frames_drawn;
 #endif
-	buf_info->frame_idx = (buf_info->frame_idx + 1u) % frame_count;
-	return (uint8_t *)buf_info->metal_buffer.contents + buf_info->frame_idx * buf_info->size_bytes;
+	return (uint8_t *)buf_info->metal_buffer.contents + buf_info->next_frame_index(frame_count) * buf_info->size_bytes;
 }
 
 void RenderingDeviceDriverMetal::buffer_flush(BufferID p_buffer) {
@@ -1250,6 +1244,10 @@ RDD::ShaderID RenderingDeviceDriverMetal::shader_create_from_container(const Ref
 	uint32_t uniform_sets_count = mtl_refl.uniform_sets.size();
 	uniform_sets.resize(uniform_sets_count);
 
+	DynamicOffsetLayout dynamic_offset_layout;
+	uint8_t dynamic_offset = 0;
+	uint8_t dynamic_count = 0;
+
 	// Create sets.
 	for (uint32_t i = 0; i < uniform_sets_count; i++) {
 		UniformSet &set = uniform_sets.write[i];
@@ -1262,6 +1260,16 @@ RDD::ShaderID RenderingDeviceDriverMetal::shader_create_from_container(const Ref
 		for (uint32_t j = 0; j < set_size; j++) {
 			const ShaderUniform &uniform = refl_set.ptr()[j];
 			const RSCM::UniformData &bind = mtl_set.ptr()[j];
+
+			switch (uniform.type) {
+				case UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC:
+				case UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC: {
+					set.dynamic_uniforms.push_back(j);
+					dynamic_count++;
+				} break;
+				default: {
+				} break;
+			}
 
 			UniformInfo &ui = *iter;
 			++iter;
@@ -1282,6 +1290,11 @@ RDD::ShaderID RenderingDeviceDriverMetal::shader_create_from_container(const Ref
 				BindingInfo bi = from_binding_info_data(info);
 				ui.bindings_secondary.insert((RDC::ShaderStage)info.shader_stage, bi);
 			}
+		}
+		if (dynamic_count > 0) {
+			dynamic_offset_layout.set_offset_count(i, dynamic_offset, dynamic_count);
+			dynamic_offset += dynamic_count;
+			dynamic_count = 0;
 		}
 	}
 
@@ -1377,6 +1390,8 @@ RDD::ShaderID RenderingDeviceDriverMetal::shader_create_from_container(const Ref
 		shader = rs;
 	}
 
+	shader->dynamic_offset_layout = dynamic_offset_layout;
+
 	return RDD::ShaderID(shader);
 }
 
@@ -1396,51 +1411,16 @@ void RenderingDeviceDriverMetal::shader_destroy_modules(ShaderID p_shader) {
 RDD::UniformSetID RenderingDeviceDriverMetal::uniform_set_create(VectorView<BoundUniform> p_uniforms, ShaderID p_shader, uint32_t p_set_index, int p_linear_pool_index) {
 	//p_linear_pool_index = -1; // TODO:? Linear pools not implemented or not supported by API backend.
 
-	// We first gather dynamic arrays in a local array because TightLocalVector's
-	// growth is not efficient when the number of elements is unknown.
-	MetalBufferDynamicInfo const *dynamic_buffers[MAX_DYNAMIC_BUFFERS];
-	uint32_t num_dynamic_buffers = 0u;
-
+	MDShader *shader = (MDShader *)p_shader.id;
+	const UniformSet *us = &shader->sets[p_set_index];
 	MDUniformSet *set = memnew(MDUniformSet);
 	Vector<BoundUniform> bound_uniforms;
-	const uint32_t uniform_count = p_uniforms.size();
-	bound_uniforms.resize(uniform_count);
-	for (uint32_t i = 0; i < uniform_count; i += 1) {
-		const BoundUniform &uniform = p_uniforms[i];
-
-		switch (p_uniforms[i].type) {
-			case UNIFORM_TYPE_UNIFORM_BUFFER:
-			case UNIFORM_TYPE_STORAGE_BUFFER: {
-				const BufferInfo *buf_info = (const BufferInfo *)uniform.ids[0].id;
-				ERR_FAIL_COND_V_MSG(buf_info->is_dynamic(), UniformSetID(),
-						"Sent a buffer with BUFFER_USAGE_DYNAMIC_PERSISTENT_BIT but binding (" + itos(uniform.binding) + "), set (" + itos(p_set_index) + ") is UNIFORM_TYPE_UNIFORM_BUFFER instead of UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC.");
-				bound_uniforms.write[i] = uniform;
-				// We're baking the sets, so get rid of one indirection. Only *_DYNAMIC needs the indirection.
-				bound_uniforms.write[i].ids[0] = rid::make(buf_info->metal_buffer);
-
-			} break;
-			case UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC:
-			case UNIFORM_TYPE_STORAGE_BUFFER_DYNAMIC: {
-				const BufferInfo *buf_info = (const BufferInfo *)uniform.ids[0].id;
-				ERR_FAIL_COND_V_MSG(!buf_info->is_dynamic(), UniformSetID(),
-						"Sent a buffer without BUFFER_USAGE_DYNAMIC_PERSISTENT_BIT but binding (" + itos(uniform.binding) + "), set (" + itos(p_set_index) + ") is UNIFORM_TYPE_UNIFORM_BUFFER_DYNAMIC instead of UNIFORM_TYPE_UNIFORM_BUFFER.");
-				ERR_FAIL_COND_V_MSG(num_dynamic_buffers >= MAX_DYNAMIC_BUFFERS, UniformSetID(),
-						"Uniform set exceeded the limit of dynamic/persistent buffers. (" + itos(MAX_DYNAMIC_BUFFERS) + ").");
-				bound_uniforms.write[i] = uniform;
-				dynamic_buffers[num_dynamic_buffers++] = (const MetalBufferDynamicInfo *)buf_info;
-			} break;
-			default: {
-				bound_uniforms.write[i] = uniform;
-				break;
-			}
-		}
+	bound_uniforms.resize(p_uniforms.size());
+	for (uint32_t i = 0; i < p_uniforms.size(); i += 1) {
+		bound_uniforms.write[i] = p_uniforms[i];
 	}
 	set->uniforms = bound_uniforms;
 	set->index = p_set_index;
-	set->dynamic_buffers.resize(num_dynamic_buffers);
-	for (size_t i = 0u; i < num_dynamic_buffers; ++i) {
-		set->dynamic_buffers[i] = dynamic_buffers[i];
-	}
 
 	return UniformSetID(set);
 }
@@ -1450,26 +1430,33 @@ void RenderingDeviceDriverMetal::uniform_set_free(UniformSetID p_uniform_set) {
 	memdelete(obj);
 }
 
-uint32_t RenderingDeviceDriverMetal::uniform_sets_get_dynamic_offsets(VectorView<UniformSetID> p_uniform_sets, uint32_t p_set_count) const {
+uint32_t RenderingDeviceDriverMetal::uniform_sets_get_dynamic_offsets(VectorView<UniformSetID> p_uniform_sets, ShaderID p_shader, uint32_t p_first_set_index, uint32_t p_set_count) const {
+	const MDShader *shader = (const MDShader *)p_shader.id;
+	const DynamicOffsetLayout layout = shader->dynamic_offset_layout;
+
+	if (layout.is_empty()) {
+		return 0u;
+	}
+
 	uint32_t mask = 0u;
-	uint32_t shift = 0u;
-#ifdef DEV_ENABLED
-	uint32_t curr_dynamic_offset = 0u;
-#endif
 
 	for (uint32_t i = 0; i < p_set_count; i++) {
-		const MDUniformSet *usi = (const MDUniformSet *)p_uniform_sets[i].id;
-		// At this point this assert should already have been validated.
-		DEV_ASSERT(curr_dynamic_offset + usi->dynamic_buffers.size() <= MAX_DYNAMIC_BUFFERS);
+		const uint32_t index = p_first_set_index + i;
+		uint32_t shift = layout.get_offset_index_shift(index);
+		const uint32_t count = layout.get_count(index);
+		DEV_ASSERT(shader->sets[index].dynamic_uniforms.size() == count);
+		if (count == 0) {
+			continue;
+		}
 
-		for (const MetalBufferDynamicInfo *dynamic_buffer : usi->dynamic_buffers) {
-			DEV_ASSERT(dynamic_buffer->frame_idx < 16u);
-			mask |= dynamic_buffer->frame_idx << shift;
+		const MDUniformSet *usi = (const MDUniformSet *)p_uniform_sets[i].id;
+		for (uint32_t uniform_index : shader->sets[index].dynamic_uniforms) {
+			const RDD::BoundUniform &uniform = usi->uniforms[uniform_index];
+			DEV_ASSERT(uniform.is_dynamic());
+			const MetalBufferDynamicInfo *buf_info = (const MetalBufferDynamicInfo *)uniform.ids[0].id;
+			mask |= buf_info->frame_index() << shift;
 			shift += 4u;
 		}
-#ifdef DEV_ENABLED
-		curr_dynamic_offset += usi->dynamic_buffers.size();
-#endif
 	}
 
 	return mask;
@@ -2590,6 +2577,8 @@ void RenderingDeviceDriverMetal::command_insert_breadcrumb(CommandBufferID p_cmd
 #pragma mark - Submission
 
 void RenderingDeviceDriverMetal::begin_segment(uint32_t p_frame_index, uint32_t p_frames_drawn) {
+	frame_index = p_frame_index;
+	frames_drawn = p_frames_drawn;
 }
 
 void RenderingDeviceDriverMetal::end_segment() {
@@ -2624,7 +2613,7 @@ void RenderingDeviceDriverMetal::set_object_name(ObjectType p_type, ID p_driver_
 		} break;
 		case OBJECT_TYPE_UNIFORM_SET: {
 			MDUniformSet *set = (MDUniformSet *)(p_driver_id.id);
-			for (KeyValue<MDUniformSet::CacheKey, BoundUniformSet> &keyval : set->bound_uniforms) {
+			for (KeyValue<MDShader *, BoundUniformSet> &keyval : set->bound_uniforms) {
 				keyval.value.buffer.label = [NSString stringWithUTF8String:p_name.utf8().get_data()];
 			}
 		} break;
@@ -2992,6 +2981,8 @@ static MetalDeviceProfile device_profile_from_properties(MetalDeviceProperties *
 			CRASH_NOW_MSG("Unsupported GPU family");
 		} break;
 	}
+
+	res.update_options();
 
 	return res;
 }
